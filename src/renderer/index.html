@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' file:; img-src 'self' data: file:; media-src 'self' data: file:" />
+  <title>日历提醒</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="bgImageLayer" hidden></div>
+  <div id="app">
+    <!-- 顶部栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">EveCalendar</span>
+        <span class="brand-sub">日历提醒</span>
+      </div>
+      <div class="nav">
+        <button class="icon-btn" id="btnToday" title="回到今天">今天</button>
+        <button class="icon-btn" id="btnPrev" title="上个月">‹</button>
+        <h2 class="month-title" id="monthTitle"></h2>
+        <button class="icon-btn" id="btnNext" title="下个月">›</button>
+      </div>
+      <div class="top-actions">
+        <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- 左：月历 -->
+      <section class="cal-panel">
+        <div class="week-head" id="calHead"></div>
+        <div class="cal-grid" id="calGrid"></div>
+      </section>
+
+      <!-- 右：选中日任务 -->
+      <aside class="day-panel">
+        <div class="day-head">
+          <h3 id="dayTitle"></h3>
+          <div class="day-head-actions">
+            <button class="icon-btn small" id="btnDayImg" title="给这一天设置图片">📷</button>
+            <button class="primary-btn small" id="btnAddTask">＋ 添加任务</button>
+          </div>
+        </div>
+        <div class="day-tasks" id="dayTasks">
+          <div class="empty-tip" id="emptyTip">这一天还没有任务，点击「添加任务」安排一下吧</div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- 任务编辑弹窗 -->
+  <div class="modal-mask" id="taskModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="taskModalTitle">新建任务</h3>
+        <button class="icon-btn" data-close="taskModal">✕</button>
+      </div>
+      <form id="taskForm" autocomplete="off">
+        <input type="hidden" id="fId" />
+        <div class="field">
+          <label>标题</label>
+          <input type="text" id="fTitle" placeholder="要做什么？" required maxlength="120" />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>日期</label>
+            <input type="date" id="fDate" required />
+          </div>
+          <div class="field">
+            <label>时间</label>
+            <input type="time" id="fTime" required />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>重复</label>
+            <select id="fRepeat">
+              <option value="none">不重复</option>
+              <option value="daily">每天</option>
+              <option value="weekdays">工作日（周一~五）</option>
+              <option value="weekly">每周（同一天）</option>
+              <option value="monthly">每月（同一日）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>优先级</label>
+            <select id="fPriority">
+              <option value="low">低</option>
+              <option value="medium" selected>中</option>
+              <option value="high">高</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>标签（逗号分隔）</label>
+          <input type="text" id="fTags" placeholder="如：工作, 家务" maxlength="80" />
+        </div>
+        <div class="field">
+          <label>备注</label>
+          <textarea id="fNote" rows="2" placeholder="可选备注…" maxlength="300"></textarea>
+        </div>
+
+        <div class="field">
+          <label>提醒（可添加多条）</label>
+          <div id="reminderList"></div>
+          <button type="button" class="ghost-btn small" id="btnAddReminder">＋ 添加提醒</button>
+        </div>
+
+        <div class="modal-foot">
+          <button type="button" class="ghost-btn" data-close="taskModal">取消</button>
+          <button type="submit" class="primary-btn">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal-mask" id="settingsModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>设置</h3>
+        <button class="icon-btn" data-close="settingsModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>强调色（按钮 / 选中 / 高亮）</label>
+          <div class="theme-row" id="themeSwatches"></div>
+          <div class="theme-custom">
+            <input type="color" id="sAccent" value="#4f6bff" />
+            <label for="sAccent" class="hint">自定义强调色，即时生效</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>背景色（日历底色）</label>
+          <div class="theme-row" id="themeSwatchesBg"></div>
+          <div class="theme-custom">
+            <input type="color" id="sAccentBg" value="#f4f6fb" />
+            <label for="sAccentBg" class="hint">自定义背景色（建议选浅色，深色时文字对比度会降低）</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>日历背景（图片或视频，二选一）</label>
+          <div class="theme-custom">
+            <button type="button" class="ghost-btn small" id="btnPickBg">选择背景图片…</button>
+            <button type="button" class="ghost-btn small" id="btnClearBg" hidden>移除图片</button>
+          </div>
+          <div class="theme-custom" style="margin-top:6px">
+            <button type="button" class="ghost-btn small" id="btnPickVid">选择背景视频…</button>
+            <button type="button" class="ghost-btn small" id="btnClearVid" hidden>移除视频</button>
+          </div>
+          <div class="vid-fmt">🎬 视频支持格式：<b>MP4</b>（H.264 编码）· <b>WebM</b>（VP9/VP8）· mov 需为 H.264/AAC 编码；会自动静音循环播放</div>
+          <div class="field-inner-block">
+            <button type="button" class="ghost-btn small" id="btnAddSlides">＋ 幻灯片：添加图片…</button>
+            <button type="button" class="ghost-btn small" id="btnClearSlides" hidden>清空</button>
+          </div>
+          <div class="slide-cfg" id="slideCfgWrap" hidden>
+            <div class="theme-custom">
+              <label class="opacity-label">间隔</label>
+              <input type="number" id="slideInterval" min="1" max="600" step="1" />
+              <span class="opacity-label">秒</span>
+              <select id="slideMode">
+                <option value="order">顺序循环</option>
+                <option value="shuffle">随机循环（一轮不重复）</option>
+              </select>
+            </div>
+          </div>
+          <div class="opacity-row" id="bgOpacityWrap" hidden>
+            <span class="opacity-label">面板透明度</span>
+            <input type="range" id="sBgOpacity" min="0" max="100" value="50" />
+            <span class="opacity-val" id="sBgOpacityVal">50%</span>
+          </div>
+          <p class="hint">背景播放优先顺序：视频 ＞ 图片幻灯片 ＞ 单张图片。幻灯片随机模式一轮内不重复、播完自动重新洗牌；最多 100 张。拖动「面板透明度」可看清背景（调高=更透）；鼠标移到面板外空白处可暂时虚化面板看全背景。</p>
+        </div>
+        <div class="field">
+          <label>每周从哪天开始</label>
+          <select id="sWeekStart">
+            <option value="1">周一</option>
+            <option value="0">周日</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>
+            <input type="checkbox" id="sNotifySound" /> 提醒时播放声音
+          </label>
+        </div>
+        <div class="field">
+          <label>
+            <input type="checkbox" id="sAutoStart" /> 开机自动启动（后台静默运行）
+          </label>
+          <p class="hint">勾选后，开机进入系统时日历会在后台（托盘）自动运行、准时提醒但不弹窗口；点托盘图标即可打开界面。取消勾选即关闭开机自启。</p>
+        </div>
+        <div class="field">
+          <label>插件（开源扩展口）</label>
+          <div id="pluginList"></div>
+          <div class="theme-custom">
+            <button type="button" class="ghost-btn small" id="btnOpenPluginDir">打开插件目录…</button>
+          </div>
+          <p class="hint">每个插件是插件目录下的一个文件夹（plugin.json + renderer.js）。勾选/取消在下次启动时生效。开发文档见项目 README 的「插件口」章节。</p>
+        </div>
+        <p class="hint">提醒通过 Windows 系统通知发出，日历窗口最小化或隐藏到托盘也会准时提醒。关闭窗口 = 最小化到托盘（右下角图标），从托盘菜单「退出」才会真正退出。</p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="primary-btn" data-close="settingsModal">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 单日图片管理弹窗 -->
+  <div class="modal-mask" id="imgModal" hidden>
+    <div class="modal modal-sm">
+      <div class="modal-head">
+        <h3>日期图片</h3>
+        <button class="icon-btn" data-close="imgModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="dayimg-date" id="imgModalDate"></p>
+        <div class="dayimg-preview" id="imgModalPreview">
+          <span class="placeholder">这一天还没有图片</span>
+        </div>
+        <div class="dayimg-btns">
+          <button type="button" class="primary-btn small" id="btnPickDayImg">📷 选择图片…</button>
+          <button type="button" class="ghost-btn small" id="btnRemoveDayImg" hidden>移除图片</button>
+        </div>
+        <p class="hint">选中的图片会以贴纸形式显示在该日期格子的右上角，点击格子弹大图查看。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务详情/删除气泡 -->
+  <div id="confirmWrap" hidden>
+    <div class="confirm-box">
+      <p id="confirmText"></p>
+      <div class="confirm-btns">
+        <button class="ghost-btn" id="confirmNo">取消</button>
+        <button class="danger-btn" id="confirmYes">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

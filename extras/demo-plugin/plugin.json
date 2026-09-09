@@ -1,0 +1,7 @@
+{
+  "name": "示例插件：快捷任务",
+  "version": "0.1.0",
+  "description": "演示插件口：右下角显示插件徽标与一个快捷按钮（一键为今天 23:00 建任务），并监听任务保存事件弹出提示。",
+  "author": "EveStudio",
+  "renderer": "renderer.js"
+}

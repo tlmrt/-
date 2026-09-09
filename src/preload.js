@@ -1,0 +1,38 @@
+// preload：安全地暴露 IPC API 给渲染进程
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  listTasks: () => ipcRenderer.invoke('tasks:list'),
+  saveTask: (task) => ipcRenderer.invoke('tasks:save', task),
+  deleteTask: (id) => ipcRenderer.invoke('tasks:delete', id),
+  getPrefs: () => ipcRenderer.invoke('prefs:get'),
+  setPrefs: (patch) => ipcRenderer.invoke('prefs:set', patch),
+  onFocusTask: (cb) => {
+    const handler = (_e, taskId) => cb(taskId);
+    ipcRenderer.on('focus-task', handler);
+    return () => ipcRenderer.removeListener('focus-task', handler);
+  },
+
+  // ---- 图片 ----
+  // 打开系统文件选择框挑一张图片，复制进应用数据目录
+  pickImage: () => ipcRenderer.invoke('img:pick'),
+  // 根据文件名返回绝对路径（null 表示不存在）
+  imagePath: (fileName) => ipcRenderer.invoke('img:path', fileName),
+  // 单日图片：{ 'YYYY-MM-DD': 绝对路径 }
+  getDayImages: () => ipcRenderer.invoke('dayimg:get'),
+  setDayImage: (date, fileName) => ipcRenderer.invoke('dayimg:set', { date, fileName }),
+  // 日历整体背景图（fileName 或 null 移除）
+  setBgImage: (fileName) => ipcRenderer.invoke('bgimg:set', fileName),
+  // 背景视频：选择/存取
+  pickVideo: () => ipcRenderer.invoke('vid:pick'),
+  setBgVideo: (fileName) => ipcRenderer.invoke('bgvideo:set', fileName),
+  // 图片幻灯片：多选图片（追加用）
+  pickManyImages: () => ipcRenderer.invoke('imgs:pick'),
+  // 开机自启（后台静默）
+  getAutostart: () => ipcRenderer.invoke('autostart:get'),
+  setAutostart: (flag) => ipcRenderer.invoke('autostart:set', flag),
+  // 插件系统
+  listPlugins: () => ipcRenderer.invoke('plugins:list'),
+  setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:enable', { id, enabled }),
+  openPluginDir: () => ipcRenderer.invoke('plugins:openDir'),
+});
