@@ -392,20 +392,8 @@ function scanPlugins() {
   return out;
 }
 
-// 首次运行：把内置示例插件复制到插件目录（不覆盖用户已有文件）
-function ensureDemoPlugin() {
-  try {
-    const src = path.join(__dirname, '..', 'extras', 'demo-plugin');
-    if (!fs.existsSync(src)) return;
-    const dst = path.join(PLUGIN_DIR(), 'demo-greeting');
-    if (fs.existsSync(dst)) return;
-    fs.mkdirSync(PLUGIN_DIR(), { recursive: true });
-    fs.cpSync(src, dst, { recursive: true });
-    console.log('[plugins] 示例插件已安装:', dst);
-  } catch (e) {
-    console.error('安装示例插件失败', e);
-  }
-}
+// 首次运行安装示例插件：已移除 —— 默认不装任何插件。
+// 想体验插件：把 extras/demo-plugin/ 整个文件夹复制到用户插件目录 plugins/demo-greeting/，重启应用即可。
 
 ipcMain.handle('plugins:list', () => scanPlugins());
 ipcMain.handle('plugins:enable', (e, { id, enabled }) => {
@@ -547,7 +535,6 @@ app.whenReady().then(() => {
   if (!Array.isArray(tasks)) tasks = [];
   dayImgMap = loadJSON(DAYIMG_FILE(), {});
   if (!dayImgMap || typeof dayImgMap !== 'object' || Array.isArray(dayImgMap)) dayImgMap = {};
-  ensureDemoPlugin(); // 首次运行安装示例插件
 
   createTray();
   // 开机自启（--hidden）时不弹主窗口，只在后台托盘运行并计时提醒；
