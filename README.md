@@ -97,9 +97,11 @@ node test/reminder.test.js   # 提醒引擎单测
 npm run dist       # 打包 Windows 安装包(NSIS) + 便携版 → release/
 ```
 
-## 📜 开源
+## 📜 开源与贡献
 
-MIT License，见 [LICENSE](LICENSE)。欢迎 Fork、提 PR 与 Issue。
+- MIT License，见 [LICENSE](LICENSE)。
+- 仓库由维护者管理，**写权限仅限维护者本人**；欢迎所有人 Fork 与提交 Pull Request / Issue 参与改进，合并由维护者审阅后执行。
+- 尚未推送远程仓库（维护者暂无 GitHub 账号），就绪后按"公开仓库、仅维护者可改"发布。
 
 ## 📁 目录速览
 
