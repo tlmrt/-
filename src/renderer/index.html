@@ -40,6 +40,7 @@
         <div class="day-head">
           <h3 id="dayTitle"></h3>
           <div class="day-head-actions">
+            <button class="icon-btn small" id="btnDayMaa" title="这一天的 MAA 配置（一键长草）">🎮</button>
             <button class="icon-btn small" id="btnDaySeg" title="给这一天添加时间段（液体倒计时）">⏳</button>
             <button class="icon-btn small" id="btnDayImg" title="给这一天设置图片">📷</button>
             <button class="primary-btn small" id="btnAddTask">＋ 添加任务</button>
@@ -436,6 +437,12 @@
           <button type="button" class="ghost-btn small" id="btnMaaPanelStop">停止</button>
           <button type="button" class="ghost-btn small" id="btnMaaPanelReload">重新载入</button>
           <button type="button" class="ghost-btn small" id="btnMaaPanelDir">配置目录</button>
+        </div>
+        <div class="maa-panel-bar maa-date-bar">
+          <span class="opacity-label">这一天</span>
+          <span class="holi-status" id="maaPanelDate" style="margin:0">—</span>
+          <label class="inline-check" style="margin:0"><input type="checkbox" id="maaBindDate" /> 使用独立配置（不同日子可用不同的一键长草配置）</label>
+          <button type="button" class="ghost-btn small" id="btnMaaCreateForDate">为这一天新建配置…</button>
         </div>
         <p class="hint">下面就是 MAA 配置文件里的任务队列（等同 MAA 的「一键长草」）：勾选要执行的任务、按需改参数，改完点右下角「保存到 MAA 配置」。保存后 MAA 启动即按这份配置运行（MAA 里开启"运行前直接开始"时会自动开跑）。</p>
         <div id="maaTaskList" class="maa-task-list"></div>

@@ -900,6 +900,12 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 /* ---------- MAA 任务面板（一键长草配置） ---------- */
 .modal.modal-lg { width: 760px; }
 .maa-panel-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.maa-date-bar {
+  background: rgba(var(--primary-rgb), .06);
+  border: 1px solid rgba(var(--primary-rgb), .16);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
 .maa-panel-bar select {
   border: 1px solid var(--border);
   border-radius: 8px;

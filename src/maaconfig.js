@@ -239,6 +239,17 @@ function applyTaskPatch(task, patch) {
   return out;
 }
 
+// 为某天建议一个 MAA 配置名（如 日历-09-12，重名则追加序号）
+function suggestConfigName(date, existingNames) {
+  const list = Array.isArray(existingNames) ? existingNames : [];
+  const md = String(date || '').slice(5).replace('-', '');
+  const base = md ? `日历-${md}` : '日历配置';
+  if (!list.includes(base)) return base;
+  let i = 2;
+  while (list.includes(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
 module.exports = {
   TASK_META,
   taskLabel,
@@ -250,4 +261,5 @@ module.exports = {
   toUiValue,
   buildEditableQueue,
   applyTaskPatch,
+  suggestConfigName,
 };

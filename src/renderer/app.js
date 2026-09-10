@@ -1527,10 +1527,24 @@ $('#btnMaaStop').addEventListener('click', async () => {
 
 // ---------- MAA 任务面板（与「一键长草」一致的配置界面） ----------
 let maaPanelData = null;
+let maaPanelDate = null;
 
-$('#btnMaaPanel').addEventListener('click', () => openMaaPanel());
+$('#btnMaaPanel').addEventListener('click', () => openMaaPanel(selectedDate));
+$('#btnDayMaa').addEventListener('click', () => openMaaPanel(selectedDate));
 
-async function openMaaPanel() {
+// 为某天建议一个 MAA 配置名（与 maaconfig.suggestConfigName 同规则）
+function suggestMaaConfigName(date, existing) {
+  const list = Array.isArray(existing) ? existing : [];
+  const md = String(date || '').slice(5).replace('-', '');
+  const base = md ? `日历-${md}` : '日历配置';
+  if (!list.includes(base)) return base;
+  let i = 2;
+  while (list.includes(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
+async function openMaaPanel(date) {
+  maaPanelDate = date || selectedDate;
   $('#maaPanel').hidden = false;
   await loadMaaPanel();
 }
@@ -1538,7 +1552,7 @@ async function openMaaPanel() {
 async function loadMaaPanel() {
   $('#maaPanelMsg').textContent = '';
   $('#maaTaskList').innerHTML = '<div class="hint">读取中…</div>';
-  const r = await window.api.maaConfigLoad();
+  const r = await window.api.maaConfigLoad(maaPanelDate);
   if (!r || !r.ok) {
     maaPanelData = null;
     $('#maaPanelStatus').textContent = '无法读取 MAA 配置';
@@ -1546,6 +1560,8 @@ async function loadMaaPanel() {
     return;
   }
   maaPanelData = r;
+  $('#maaPanelDate').textContent = maaPanelDate || '未选择日期';
+  $('#maaBindDate').checked = !!r.bound;
   $('#maaPanelStatus').textContent = `已载入 ${r.tasks.length} 个任务 · ${r.startDirectly ? '启动后直接运行' : '启动后需手动开始'}`;
   const sel = $('#maaCfgSelect');
   sel.innerHTML = '';
@@ -1642,12 +1658,41 @@ $('#btnMaaPanelDir').addEventListener('click', async () => {
   if (!r || !r.ok) alert('打开配置目录失败：' + ((r && r.error) || '未知错误'));
 });
 $('#maaCfgSelect').addEventListener('change', async (e) => {
-  await window.api.maaConfigSetCurrent(e.target.value);
+  const name = e.target.value;
+  if ($('#maaBindDate').checked && maaPanelDate) {
+    await window.api.maaSetDateConfig(maaPanelDate, name);
+  } else {
+    await window.api.maaConfigSetCurrent(name);
+  }
   await loadMaaPanel();
 });
+
+// 勾选"这一天的独立配置"
+$('#maaBindDate').addEventListener('change', async (e) => {
+  if (!maaPanelDate) { e.target.checked = false; return; }
+  if (e.target.checked) {
+    await window.api.maaSetDateConfig(maaPanelDate, $('#maaCfgSelect').value);
+  } else {
+    await window.api.maaSetDateConfig(maaPanelDate, null);
+  }
+  await loadMaaPanel();
+});
+
+// 为这一天新建一套配置（复制当前配置）
+$('#btnMaaCreateForDate').addEventListener('click', async () => {
+  if (!maaPanelData) { alert('请先成功载入 MAA 配置'); return; }
+  if (!maaPanelDate) { alert('请先在日历里选择一天'); return; }
+  const defaultName = suggestMaaConfigName(maaPanelDate, maaPanelData.configs || []);
+  const name = prompt(`为 ${maaPanelDate} 新建一套 MAA 配置（会复制「${maaPanelData.current}」的任务设置）`, defaultName);
+  if (!name || !name.trim()) return;
+  const r = await window.api.maaConfigCreate(name.trim(), maaPanelData.current);
+  if (!r || !r.ok) { alert('创建失败：' + ((r && r.error) || '未知错误')); return; }
+  await window.api.maaSetDateConfig(maaPanelDate, r.name);
+  await loadMaaPanel();
+});
+
 $('#btnMaaPanelStart').addEventListener('click', async () => {
-  const st = await window.api.maaStatus();
-  const r = await window.api.maaStart((st && st.autoStartTask) || undefined);
+  const r = await window.api.maaStartForDate(maaPanelDate);
   $('#maaPanelMsg').textContent = (!r || !r.ok)
     ? ('启动失败：' + ((r && r.error) || '未知错误'))
     : (r.skipped ? 'MAA 已在运行' : `已启动 MAA（PID ${r.pid}）`);

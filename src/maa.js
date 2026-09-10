@@ -44,6 +44,15 @@ function normalizeMaaPrefs(p) {
     ? [...new Set(s.tasks.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 40)
     : [];
   const autoStopMin = Number(s.autoStopMin);
+  // 日期 → MAA 配置名（不同日子用不同的一键长草配置）
+  const dateConfigs = {};
+  if (s.dateConfigs && typeof s.dateConfigs === 'object' && !Array.isArray(s.dateConfigs)) {
+    for (const [d, name] of Object.entries(s.dateConfigs)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && typeof name === 'string' && name.trim()) {
+        dateConfigs[d] = name.trim();
+      }
+    }
+  }
   return {
     exePath: typeof s.exePath === 'string' ? s.exePath : '',
     argsTemplate: typeof s.argsTemplate === 'string' ? s.argsTemplate : '',
@@ -52,6 +61,7 @@ function normalizeMaaPrefs(p) {
     tasks, // 可在日历里选择的 MAA 任务名清单
     autoStopMin: Number.isFinite(autoStopMin) && autoStopMin >= 0 ? Math.min(1440, Math.round(autoStopMin)) : 0,
     skipIfRunning: s.skipIfRunning !== false, // 已在运行时不重复启动
+    dateConfigs, // { 'YYYY-MM-DD': 'MAA 配置名' }
   };
 }
 

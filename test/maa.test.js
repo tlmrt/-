@@ -43,6 +43,10 @@ console.log('\n[3] 配置归一化');
   ok('自动停止负数归零', normalizeMaaPrefs({ autoStopMin: -5 }).autoStopMin === 0);
   ok('默认跳过已在运行的 MAA', normalizeMaaPrefs({}).skipIfRunning === true);
   ok('可关闭跳过行为', normalizeMaaPrefs({ skipIfRunning: false }).skipIfRunning === false);
+  ok('日期绑定配置：保留合法项', normalizeMaaPrefs({ dateConfigs: { '2026-09-12': '刷材料', '2026-09-13': ' 日常 ' } }).dateConfigs['2026-09-12'] === '刷材料');
+  ok('日期绑定配置：trim', normalizeMaaPrefs({ dateConfigs: { '2026-09-13': ' 日常 ' } }).dateConfigs['2026-09-13'] === '日常');
+  ok('日期绑定配置：过滤非法键值', Object.keys(normalizeMaaPrefs({ dateConfigs: { 'bad': 'x', '2026-09-12': '  ', '2026-1-1': 'y' } }).dateConfigs).length === 0);
+  ok('日期绑定配置：缺省为空对象', Object.keys(normalizeMaaPrefs(null).dateConfigs).length === 0);
 }
 
 console.log('\n[3.5] 任务级 MAA 联动配置');

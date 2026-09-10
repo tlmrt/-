@@ -9,6 +9,7 @@ const {
   toUiValue,
   buildEditableQueue,
   applyTaskPatch,
+  suggestConfigName,
 } = require('../src/maaconfig');
 
 let pass = 0, fail = 0;
@@ -90,6 +91,15 @@ console.log('\n[5] 写回补丁（不破坏未列出的字段）');
   ok('未知字段保留', patched.SomeUnknownField === 'keep-me');
   ok('原对象未被修改（不可变）', task.IsEnable === true && JSON.stringify(task.StagePlan) === '["1-7"]');
   ok('空补丁安全', applyTaskPatch(task, null).TaskType === 'Fight');
+}
+
+console.log('\n[6] 按日期生成 MAA 配置名');
+{
+  ok('常规日期', suggestConfigName('2026-09-12', []) === '日历-0912');
+  ok('重名自动加序号', suggestConfigName('2026-09-12', ['日历-0912']) === '日历-0912-2');
+  ok('多次重名继续递增', suggestConfigName('2026-09-12', ['日历-0912', '日历-0912-2']) === '日历-0912-3');
+  ok('日期为空时有兜底名', suggestConfigName('', []) === '日历配置');
+  ok('非法入参安全', suggestConfigName(null, null) === '日历配置');
 }
 
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);

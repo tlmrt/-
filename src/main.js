@@ -777,6 +777,12 @@ function maybeStartMaaForTask(task) {
   try {
     const m = normalizeTaskMaa(task && task.maa, maaPrefsLocal().autoStartTask);
     if (!m.enabled) return null;
+    // 若任务所在日期绑定了某套 MAA 配置，先切过去再启动
+    if (task && task.date) {
+      const applied = applyDateConfig(task.date);
+      if (applied && applied.applied) console.log('[maa] 使用日期绑定配置:', applied.current);
+      else if (applied && applied.ok === false) console.error('[maa] 日期配置切换失败:', applied.error);
+    }
     const r = maaStartWithOptions(m.task, { autoStopMin: m.autoStopMin });
     console.log('[maa] 任务联动触发:', task.title, '→', JSON.stringify(r));
     if (win && !win.isDestroyed()) {
@@ -1093,24 +1099,91 @@ function writeMaaConfig(ps, json) {
   }
 }
 
-ipcMain.handle('maa:configLoad', () => {
+ipcMain.handle('maa:configLoad', (e, opts) => {
+  const date = opts && /^\d{4}-\d{2}-\d{2}$/.test(opts.date || '') ? opts.date : null;
   const r = readMaaConfig();
   if (!r.ok) return r;
   const { json, ps } = r;
   const configs = Object.keys(json.Configurations || {});
-  const current = json.Current && json.Configurations && json.Configurations[json.Current]
-    ? json.Current : (configs[0] || 'Default');
+  const mp = maaPrefsLocal();
+  const bound = date ? (mp.dateConfigs || {})[date] || null : null;
+  // 有日期绑定时优先展示该配置，否则用 MAA 当前的配置
+  const current = bound && json.Configurations && json.Configurations[bound]
+    ? bound
+    : (json.Current && json.Configurations && json.Configurations[json.Current] ? json.Current : (configs[0] || 'Default'));
   const cfg = (json.Configurations || {})[current] || {};
   const start = (cfg.Gui && cfg.Gui.StartUpSettings) || {};
   return {
     ok: true,
     file: ps.file,
+    date,
+    bound,
     current,
     configs,
     tasks: buildEditableQueue(cfg.TaskQueue),
     startDirectly: !!start.RunDirectly,
     startEmulator: !!start.StartEmulator,
   };
+});
+
+// 把当前配置复制成一个新配置（供"为这一天新建配置"）
+ipcMain.handle('maa:configCreate', (e, { name, from }) => {
+  const r = readMaaConfig();
+  if (!r.ok) return r;
+  const { json, ps } = r;
+  const configs = json.Configurations || {};
+  const newName = String(name || '').trim();
+  if (!newName) return { ok: false, error: '请填写配置名' };
+  if (configs[newName]) return { ok: false, error: '配置已存在：' + newName };
+  const src = from && configs[from] ? from : json.Current;
+  if (!src || !configs[src]) return { ok: false, error: '找不到要复制的源配置' };
+  configs[newName] = JSON.parse(JSON.stringify(configs[src]));
+  json.Current = newName;
+  const w = writeMaaConfig(ps, json);
+  if (!w.ok) return w;
+  console.log('[maa] 已创建配置', newName, '（复制自', src, '）');
+  return { ok: true, name: newName, current: newName };
+});
+
+// 记录"某一天使用哪套 MAA 配置"
+ipcMain.handle('maa:setDateConfig', (e, { date, name }) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return { ok: false, error: '日期格式不正确' };
+  const mp = maaPrefsLocal();
+  const map = { ...(mp.dateConfigs || {}) };
+  if (name) map[date] = String(name).trim(); else delete map[date];
+  prefs.maa = { ...mp, dateConfigs: map };
+  savePrefs();
+  return { ok: true, date, name: map[date] || null };
+});
+
+// 切换到某天绑定的配置（若有）
+function applyDateConfig(date) {
+  const mp = maaPrefsLocal();
+  const name = (mp.dateConfigs || {})[date];
+  if (!name) return { ok: true, applied: false, current: null };
+  const r = readMaaConfig();
+  if (!r.ok) return r;
+  const { json, ps } = r;
+  if (!json.Configurations || !json.Configurations[name]) {
+    return { ok: false, error: '这一天绑定的 MAA 配置不存在：' + name };
+  }
+  if (json.Current === name) return { ok: true, applied: true, current: name };
+  json.Current = name;
+  const w = writeMaaConfig(ps, json);
+  if (!w.ok) return w;
+  console.log('[maa] 已按日期切换配置 →', name, '(', date, ')');
+  return { ok: true, applied: true, current: name };
+}
+
+// 按某天绑定的配置启动 MAA
+ipcMain.handle('maa:startForDate', (e, date) => {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : null;
+  if (d) {
+    const applied = applyDateConfig(d);
+    if (applied && applied.ok === false) console.error('[maa] 切换日期配置失败：', applied.error);
+  }
+  const taskName = maaPrefsLocal().autoStartTask;
+  return maaStartWithOptions(taskName, {});
 });
 
 ipcMain.handle('maa:configUpdateTasks', (e, { updates }) => {

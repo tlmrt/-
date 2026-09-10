@@ -50,10 +50,13 @@ contextBridge.exposeInMainWorld('api', {
   maaStop: () => ipcRenderer.invoke('maa:stop'),
   maaRunTask: (taskId) => ipcRenderer.invoke('maa:runTask', taskId),
   // MAA 任务配置（读写 MAA 的「一键长草」配置）
-  maaConfigLoad: () => ipcRenderer.invoke('maa:configLoad'),
+  maaConfigLoad: (date) => ipcRenderer.invoke('maa:configLoad', { date }),
   maaConfigUpdateTasks: (updates) => ipcRenderer.invoke('maa:configUpdateTasks', { updates }),
   maaConfigSetCurrent: (name) => ipcRenderer.invoke('maa:configSetCurrent', name),
+  maaConfigCreate: (name, from) => ipcRenderer.invoke('maa:configCreate', { name, from }),
   maaConfigOpenDir: () => ipcRenderer.invoke('maa:configOpenDir'),
+  maaSetDateConfig: (date, name) => ipcRenderer.invoke('maa:setDateConfig', { date, name }),
+  maaStartForDate: (date) => ipcRenderer.invoke('maa:startForDate', date),
   onMaaEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('maa:event', handler);
