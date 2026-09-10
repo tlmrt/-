@@ -1164,6 +1164,7 @@ $('#btnSettings').addEventListener('click', async () => {
   updateBgBtns();
   updateSoundUI();
   await updateHolidayUI();
+  await updateUpdateUI();
   await renderFestivalUI();
   await renderPluginList();
   $('#settingsModal').hidden = false;
@@ -1326,6 +1327,126 @@ $('#btnHoliImport').addEventListener('click', async () => {
 
 $('#btnHoliDir').addEventListener('click', async () => {
   try { await window.api.openHolidayDir(); } catch (e) { alert('无法打开数据目录'); }
+});
+
+// ---------- 应用更新 ----------
+let updInfo = null;
+
+function showUpdateToast(info) {
+  updInfo = info;
+  $('#utVersion').textContent = `v${info.latest}`;
+  const lines = [];
+  if (info.notes) lines.push(info.notes.split('\n').filter(Boolean).slice(0, 4).join('\n'));
+  lines.push(info.downloadUrl ? '可一键下载安装包完成升级' : '该版本没有安装包，请到发布页手动下载');
+  $('#utBody').textContent = lines.join('\n');
+  $('#utUpdate').textContent = '下载更新';
+  $('#utUpdate').onclick = () => doDownloadUpdate();
+  $('#updateToast').hidden = false;
+}
+
+window.api.onUpdateAvailable((info) => {
+  try { showUpdateToast(info); } catch (e) { console.error(e); }
+});
+window.api.onUpdateProgress((p) => {
+  if (!p || typeof p.percent !== 'number') return;
+  const txt = `下载中… ${p.percent}%`;
+  $('#updStatus').textContent = txt;
+  if (!$('#updateToast').hidden) $('#utBody').textContent = txt;
+});
+
+async function doDownloadUpdate() {
+  $('#utBody').textContent = '开始下载…';
+  $('#utUpdate').disabled = true;
+  try {
+    const r = await window.api.downloadUpdate();
+    if (r && r.ok) {
+      $('#utBody').textContent = '下载完成！点「运行安装包」即可升级（安装程序会覆盖旧版本，数据保留）。';
+      $('#utUpdate').textContent = '运行安装包';
+      $('#utUpdate').onclick = async () => { await window.api.installUpdate(); };
+      await updateUpdateUI();
+    } else {
+      const msg = (r && r.error) || '未知错误';
+      $('#utBody').textContent = `下载失败：${msg}\n不影响日历使用，可稍后重试或到发布页手动下载。`;
+      $('#utUpdate').textContent = '重试下载';
+      $('#utUpdate').onclick = () => doDownloadUpdate();
+    }
+  } finally {
+    $('#utUpdate').disabled = false;
+  }
+}
+
+async function updateUpdateUI() {
+  let st = null;
+  try { st = await window.api.updateStatus(); } catch (e) { st = null; }
+  if (!st) { $('#updStatus').textContent = '更新状态读取失败'; return; }
+  $('#sAutoUpdate').checked = st.autoCheck !== false;
+  if (document.activeElement !== $('#updRepo')) $('#updRepo').value = st.repo || '';
+  const last = st.lastCheck ? new Date(st.lastCheck).toLocaleString() : '从未';
+  const r = st.lastResult;
+  let txt = `当前版本 v${st.current} · 上次检查：${last}`;
+  if (r && r.ok) txt += ` · 最新 v${r.latest}${r.hasUpdate ? '（有可用更新）' : '（已是最新）'}`;
+  else if (r && r.error) txt += ` · 上次检查失败：${r.error}`;
+  else if (!st.repo) txt += ' · 尚未配置仓库';
+  $('#updStatus').textContent = txt;
+  $('#btnUpdDownload').hidden = !(r && r.ok && r.hasUpdate);
+  $('#btnUpdInstall').hidden = !st.downloaded;
+  $('#btnUpdPage').hidden = !(r && r.pageUrl);
+}
+
+$('#utLater').addEventListener('click', () => { $('#updateToast').hidden = true; });
+$('#utIgnore').addEventListener('click', async () => {
+  if (updInfo) await window.api.ignoreUpdate(updInfo.latest);
+  $('#updateToast').hidden = true;
+  await updateUpdateUI();
+});
+
+$('#sAutoUpdate').addEventListener('change', async (e) => {
+  await window.api.setUpdatePrefs({ autoCheck: e.target.checked });
+  await updateUpdateUI();
+});
+
+$('#btnUpdSaveRepo').addEventListener('click', async () => {
+  const repo = $('#updRepo').value.trim()
+    .replace(/^https?:\/\/github\.com\//i, '')
+    .replace(/\.git$/i, '')
+    .replace(/\/+$/, '');
+  if (repo && !/^[^\s/]+\/[^\s/]+$/.test(repo)) { alert('仓库格式应为：用户名/仓库名'); return; }
+  await window.api.setUpdatePrefs({ repo });
+  $('#updRepo').value = repo;
+  await updateUpdateUI();
+  if (repo) {
+    const r = await window.api.checkUpdate();
+    await updateUpdateUI();
+    if (r && r.ok && r.hasUpdate) showUpdateToast(r);
+    else if (r && r.ok) alert(`已是最新版本 v${r.latest}（当前 v${r.current}）`);
+    else alert('检查更新失败：' + ((r && r.error) || '未知错误'));
+  }
+});
+
+$('#btnUpdCheck').addEventListener('click', async () => {
+  const btn = $('#btnUpdCheck');
+  btn.disabled = true;
+  btn.textContent = '检查中…';
+  try {
+    const r = await window.api.checkUpdate();
+    await updateUpdateUI();
+    if (r && r.ok && r.hasUpdate) showUpdateToast(r);
+    else if (r && r.ok) alert(`已是最新版本 v${r.latest}（当前 v${r.current}）`);
+    else alert('检查更新失败：' + ((r && r.error) || '未知错误'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '检查更新';
+  }
+});
+
+$('#btnUpdDownload').addEventListener('click', () => doDownloadUpdate());
+$('#btnUpdInstall').addEventListener('click', async () => {
+  const r = await window.api.installUpdate();
+  if (!r || !r.ok) alert('无法打开安装包：' + ((r && r.error) || '未知错误'));
+});
+$('#btnUpdPage').addEventListener('click', async () => {
+  const r = await window.api.openUpdatePage();
+  if (!r || !r.ok) alert('无法打开发布页：' + ((r && r.error) || '未知错误'));
 });
 
 // ---------- 节日与农历设置 ----------

@@ -38,6 +38,25 @@ contextBridge.exposeInMainWorld('api', {
   createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
   openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),
 
+  // ---- 应用更新（直连 GitHub 仓库） ----
+  updateStatus: () => ipcRenderer.invoke('update:status'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  openUpdatePage: () => ipcRenderer.invoke('update:openPage'),
+  ignoreUpdate: (version) => ipcRenderer.invoke('update:ignore', version),
+  setUpdatePrefs: (patch) => ipcRenderer.invoke('update:setPrefs', patch),
+  onUpdateAvailable: (cb) => {
+    const handler = (_e, info) => cb(info);
+    ipcRenderer.on('update:available', handler);
+    return () => ipcRenderer.removeListener('update:available', handler);
+  },
+  onUpdateProgress: (cb) => {
+    const handler = (_e, p) => cb(p);
+    ipcRenderer.on('update:progress', handler);
+    return () => ipcRenderer.removeListener('update:progress', handler);
+  },
+
   // ---- 节假日（休息日 / 调休上班日） ----
   getHolidayStatus: () => ipcRenderer.invoke('holidays:status'),
   getHolidaysMonth: (year, month) => ipcRenderer.invoke('holidays:month', { year, month }),

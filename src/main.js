@@ -5,6 +5,8 @@
 const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { Readable, Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const dayjs = require('dayjs');
 const { computeAlertsInWindow } = require('./reminder');
 const { buildMonthFestivals, festivalMeta, normalizeFestivalPrefs, DEFAULT_FESTIVAL_PREFS } = require('./festivals');
@@ -16,6 +18,7 @@ const {
   urlForYear,
   yearsOf,
 } = require('./holidays');
+const { parseRelease, shouldNotify } = require('./updater');
 
 const APP_ID = 'cn.evestudio.calendar';
 app.setAppUserModelId(APP_ID);
@@ -54,6 +57,7 @@ const SEG_FILE = () => path.join(DATA_DIR(), 'segments.json');
 const WIDGET_FILE = () => path.join(DATA_DIR(), 'widgets.json');
 const SOUND_DIR = () => path.join(DATA_DIR(), 'sounds');
 const HOLIDAY_DIR = () => path.join(DATA_DIR(), 'holidays');
+const UPDATE_DIR = () => path.join(DATA_DIR(), 'updates');
 
 // ---------------- 数据持久化 ----------------
 function loadJSON(file, fallback) {
@@ -463,6 +467,153 @@ ipcMain.handle('holidays:openDir', async () => {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e && e.message) };
+  }
+});
+
+// ---------------- 应用更新（直连 GitHub 仓库） ----------------
+const DEFAULT_UPDATE_PREFS = { autoCheck: true, repo: '', lastCheck: null, ignoredVersion: null };
+const updateState = { lastResult: null, downloadedFile: null, progress: 0, checking: false };
+
+function updatePrefs() {
+  const u = prefs.update && typeof prefs.update === 'object' ? prefs.update : {};
+  return {
+    autoCheck: u.autoCheck !== false,
+    repo: typeof u.repo === 'string' ? u.repo.trim() : '',
+    lastCheck: u.lastCheck || null,
+    ignoredVersion: u.ignoredVersion || null,
+  };
+}
+
+function githubHeaders() {
+  return { 'User-Agent': 'EveCalendar-Updater', Accept: 'application/vnd.github+json' };
+}
+
+async function fetchLatestRelease(repo) {
+  const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    headers: githubHeaders(),
+    cache: 'no-cache',
+  });
+  if (res.status === 404) throw new Error('仓库或 Release 不存在（请检查仓库地址与是否已发布 Release）');
+  if (res.status === 403) throw new Error('GitHub API 访问受限（可能触发了频率限制，稍后再试）');
+  if (!res.ok) throw new Error(`GitHub 返回 HTTP ${res.status}`);
+  return res.json();
+}
+
+// 检查更新：任何失败都只返回错误对象，不影响应用其它功能
+async function checkForUpdates(opts) {
+  const manual = !!(opts && opts.manual);
+  const up = updatePrefs();
+  if (!up.repo) return { ok: false, error: '尚未配置 GitHub 仓库（格式：用户名/仓库名）', needRepo: true };
+  try {
+    const release = await fetchLatestRelease(up.repo);
+    const info = parseRelease(release, app.getVersion());
+    updateState.lastResult = info;
+    prefs.update = { ...up, lastCheck: Date.now() };
+    savePrefs();
+    if (info.ok && info.hasUpdate && shouldNotify(info, up.ignoredVersion)) {
+      if (win && !win.isDestroyed()) win.webContents.send('update:available', info);
+      if (!manual) notifyUpdateAvailable(info);
+    }
+    return info;
+  } catch (e) {
+    const err = { ok: false, error: String(e && e.message ? e.message : e) };
+    updateState.lastResult = err;
+    console.error('[update] 检查失败', err.error);
+    return err;
+  }
+}
+
+function notifyUpdateAvailable(info) {
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({
+      title: `发现新版本 v${info.latest}`,
+      body: '点托盘图标回到日历，在设置中可一键更新',
+      silent: true,
+    });
+    n.on('click', () => ensureWindow());
+    n.show();
+  } catch (e) {
+    console.error('[update] 通知失败', e);
+  }
+}
+
+ipcMain.handle('update:status', () => ({
+  current: app.getVersion(),
+  ...updatePrefs(),
+  downloaded: updateState.downloadedFile && fs.existsSync(updateState.downloadedFile) ? updateState.downloadedFile : null,
+  progress: updateState.progress,
+  lastResult: updateState.lastResult,
+}));
+
+ipcMain.handle('update:check', () => checkForUpdates({ manual: true }));
+
+ipcMain.handle('update:ignore', (e, version) => {
+  prefs.update = { ...updatePrefs(), ignoredVersion: version || null };
+  savePrefs();
+  return { ok: true };
+});
+
+ipcMain.handle('update:setPrefs', (e, patch) => {
+  prefs.update = { ...updatePrefs(), ...(patch || {}) };
+  savePrefs();
+  return { ok: true, prefs: updatePrefs() };
+});
+
+// 下载安装包到 userData/updates/，并回报进度
+ipcMain.handle('update:download', async () => {
+  const info = updateState.lastResult;
+  if (!info || !info.ok || !info.downloadUrl) return { ok: false, error: '没有可下载的安装包，请先检查更新' };
+  try {
+    fs.mkdirSync(UPDATE_DIR(), { recursive: true });
+    const dest = path.join(UPDATE_DIR(), info.assetName || `EveCalendar-${info.latest}.exe`);
+    const res = await fetch(info.downloadUrl, { headers: githubHeaders(), redirect: 'follow' });
+    if (!res.ok || !res.body) throw new Error(`下载失败 HTTP ${res.status}`);
+    const total = Number(res.headers.get('content-length') || 0);
+    let received = 0;
+    updateState.progress = 0;
+    const counter = new Transform({
+      transform(chunk, enc, cb) {
+        received += chunk.length;
+        if (total) {
+          const pct = Math.round((received / total) * 100);
+          updateState.progress = pct;
+          if (win && !win.isDestroyed()) win.webContents.send('update:progress', { percent: pct, received, total });
+        }
+        cb(null, chunk);
+      },
+    });
+    await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
+    updateState.downloadedFile = dest;
+    updateState.progress = 100;
+    return { ok: true, file: dest };
+  } catch (e) {
+    updateState.progress = 0;
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+
+// 打开已下载的安装包（由用户确认后运行安装，覆盖升级）
+ipcMain.handle('update:install', async () => {
+  const f = updateState.downloadedFile;
+  if (!f || !fs.existsSync(f)) return { ok: false, error: '安装包不存在，请先下载更新' };
+  try {
+    const msg = await shell.openPath(f);
+    if (msg) return { ok: false, error: msg };
+    return { ok: true, file: f };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+
+ipcMain.handle('update:openPage', async () => {
+  const info = updateState.lastResult;
+  if (!info || !info.pageUrl) return { ok: false, error: '没有发布页地址' };
+  try {
+    await shell.openExternal(info.pageUrl);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
   }
 });
 
@@ -1053,6 +1204,7 @@ app.whenReady().then(() => {
   prefs = { weekStart: 1, notifySound: true, ...loadJSON(PREFS_FILE(), {}) };
   if (!prefs.alertSound || typeof prefs.alertSound !== 'object') prefs.alertSound = { ...DEFAULT_SOUND_PREFS };
   if (!prefs.holidays || typeof prefs.holidays !== 'object') prefs.holidays = { ...DEFAULT_HOLIDAY_PREFS };
+  if (!prefs.update || typeof prefs.update !== 'object') prefs.update = { ...DEFAULT_UPDATE_PREFS };
   loadHolidays(); // 载入休息日 / 调休数据
   if (!prefs.festivals || typeof prefs.festivals !== 'object') prefs.festivals = { ...DEFAULT_FESTIVAL_PREFS };
   if (!Array.isArray(prefs.festivals.countries) || !prefs.festivals.countries.length) prefs.festivals.countries = ['cn'];
@@ -1073,6 +1225,14 @@ app.whenReady().then(() => {
 
   setInterval(tick, 10 * 1000);
   tick(); // 立即跑一次（含启动补发）
+
+  // 自动检查更新：启动 12 秒后一次，之后每 6 小时一次；失败仅记录日志，不影响使用
+  setTimeout(() => {
+    if (updatePrefs().autoCheck) checkForUpdates({}).catch(() => {});
+  }, 12 * 1000);
+  setInterval(() => {
+    if (updatePrefs().autoCheck) checkForUpdates({}).catch(() => {});
+  }, 6 * 60 * 60 * 1000);
 
   app.on('activate', () => {
     ensureWindow();

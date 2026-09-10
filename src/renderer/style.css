@@ -836,3 +836,34 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 .day-cell.is-holiday.outside { background: rgba(255, 107, 107, .04); }
 .day-cell.is-workday { background: rgba(107, 114, 128, .07); }
 .day-cell.is-holiday .day-num { color: #d94a4a; }
+
+/* ---------- 应用更新 ---------- */
+.theme-custom input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+#updateToast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 300px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 14px 40px rgba(16, 24, 40, .26);
+  border: 1px solid rgba(16, 24, 40, .08);
+  padding: 14px 16px;
+  z-index: 320;
+  animation: utSlide .28s ease;
+}
+#updateToast[hidden] { display: none; }
+@keyframes utSlide { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.ut-head { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.ut-head b { color: var(--primary); }
+.ut-body { font-size: 12.5px; color: var(--text-2); line-height: 1.6; margin-bottom: 10px; max-height: 72px; overflow: auto; }
+.ut-btns { display: flex; gap: 6px; flex-wrap: wrap; }

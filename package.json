@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node test/reminder.test.js && node test/festivals.test.js && node test/holidays.test.js",
+    "test": "node test/reminder.test.js && node test/festivals.test.js && node test/holidays.test.js && node test/updater.test.js",
     "dist": "electron-builder --win"
   },
   "build": {
