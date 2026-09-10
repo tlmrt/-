@@ -1558,7 +1558,18 @@ function normalizeStageCodeLocal(input) {
 
 function searchLevelsLocal(keyword) {
   const raw = String(keyword == null ? '' : keyword).trim();
-  if (!raw) return maaLevels.slice(0, 12);
+  const rank = { common: 0, event: 1, resource: 2, main: 3, other: 4 };
+  const rankOf = (l) => (rank[l.group] !== undefined ? rank[l.group] : 5);
+  const byGroup = (a, b) => {
+    const g = rankOf(a) - rankOf(b);
+    if (g) return g;
+    if (a.group === 'event' && b.group === 'event') {
+      const byNew = (Number(b.eventOrder) || 0) - (Number(a.eventOrder) || 0);
+      if (byNew) return byNew;
+    }
+    return String(a.code).localeCompare(String(b.code), 'zh-CN', { numeric: true, sensitivity: 'base' });
+  };
+  if (!raw) return [...maaLevels].sort(byGroup).slice(0, 12); // 常用资源本 + 最新活动置顶
   const key = stageKeyLocal(raw);
   const lower = raw.toLowerCase();
   const scored = [];
@@ -1572,7 +1583,9 @@ function searchLevelsLocal(keyword) {
     else if (String(l.stageId || '').toLowerCase().includes(lower)) score = 20;
     if (score) scored.push({ score, l });
   }
-  scored.sort((a, b) => b.score - a.score || String(a.l.code).localeCompare(String(b.l.code)));
+  scored.sort((a, b) => b.score - a.score
+    || rankOf(a.l) - rankOf(b.l)
+    || String(a.l.code).localeCompare(String(b.l.code), 'zh-CN', { numeric: true, sensitivity: 'base' }));
   return scored.slice(0, 12).map((x) => x.l);
 }
 
@@ -1691,7 +1704,11 @@ function bindLevelsWidget(scope) {
     function renderChips() {
       const list = getList();
       chips.innerHTML = list.length
-        ? list.map((c, i) => `<span class="ml-chip" title="第 ${i + 1} 个执行">${esc(c)}<b data-i="${i}">✕</b></span>`).join('')
+        ? list.map((c, i) => {
+          const info = maaLevels.find((l) => l.code === c);
+          const tip = `第 ${i + 1} 个执行${info && info.groupLabel ? ' · ' + info.groupLabel : ''}${info && info.apCost ? ' · ' + info.apCost + ' 理智' : ''}`;
+          return `<span class="ml-chip" title="${esc(tip)}">${esc(c)}<b data-i="${i}">✕</b></span>`;
+        }).join('')
         : '<span class="ml-empty">还没有选择关卡</span>';
       chips.querySelectorAll('.ml-chip b').forEach((b) => {
         b.addEventListener('click', () => {
@@ -1721,8 +1738,10 @@ function bindLevelsWidget(scope) {
         return;
       }
       sug.hidden = false;
-      sug.innerHTML = hits.map((l) => `<div class="ml-item" data-code="${esc(l.code)}">
+      const groupHint = '<div class="ml-hint">按「常用 → 活动 → 资源本 → 主线」排列</div>';
+      sug.innerHTML = groupHint + hits.map((l) => `<div class="ml-item" data-code="${esc(l.code)}">
           <b>${esc(l.code)}</b>
+          ${l.groupLabel ? `<span class="ml-group g-${esc(l.group || 'other')}">${esc(l.groupLabel)}</span>` : ''}
           <span class="ml-meta">${l.apCost ? l.apCost + ' 理智' : ''}${(l.drops || []).length ? ' · ' + esc((l.drops || []).slice(0, 3).join(' / ')) : ''}</span>
         </div>`).join('');
       sug.querySelectorAll('.ml-item[data-code]').forEach((it) => {

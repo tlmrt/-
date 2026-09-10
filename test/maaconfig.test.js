@@ -128,5 +128,39 @@ console.log('\n[7] 关卡匹配与搜索（配合 MAA stages.json）');
   ok('搜索：可限制条数', searchLevels('', levels, 2).length === 2);
 }
 
+console.log('\n[8] 关卡分组排序（常用 / 活动 置顶，与 MAA 一致）');
+{
+  const levels = [
+    { code: '7-4', stageId: 'main_07-04', group: 'main' },
+    { code: 'GT-1', stageId: 'a001_01_perm', group: 'event' },
+    { code: 'CE-6', stageId: 'wk_melee_6', group: 'common' },
+    { code: 'SK-5', stageId: 'wk_fly_5', group: 'common' },
+    { code: '1-7', stageId: 'main_01-07', group: 'common' },
+    { code: 'LS-5', stageId: 'wk_kc_5', group: 'resource' },
+  ];
+  const s = searchLevels('', levels);
+  ok('常用关卡排最前（按自然序）', s.slice(0, 3).map((l) => l.code).join(',') === '1-7,CE-6,SK-5', s.map((l) => l.code).join(','));
+  ok('活动本排在常用之后', s[3].group === 'event');
+  ok('资源本再次之', s[4].group === 'resource');
+  ok('主线最后', s[5].group === 'main');
+
+  // 同等匹配强度时，常用组优先
+  const s2 = searchLevels('-', levels);
+  ok('模糊搜索同样按分组排序', s2[0].group === 'common', JSON.stringify(s2.map((l) => l.code)));
+}
+
+console.log('\n[9] 活动本按"最新活动优先"排序');
+{
+  const levels = [
+    { code: 'GT-1', stageId: 'a001_01_perm', group: 'event', eventOrder: 1 },
+    { code: 'BI-1', stageId: 'act14side_01_perm', group: 'event', eventOrder: 14 },
+    { code: 'TW-1', stageId: 'act4d0_01', group: 'event', eventOrder: 4 },
+    { code: 'CE-6', stageId: 'wk_melee_6', group: 'common' },
+  ];
+  const s = searchLevels('', levels);
+  ok('常用本仍在最前', s[0].code === 'CE-6');
+  ok('活动本按活动编号降序（最新优先）', s.slice(1).map((l) => l.code).join(',') === 'BI-1,TW-1,GT-1', s.map((l) => l.code).join(','));
+}
+
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

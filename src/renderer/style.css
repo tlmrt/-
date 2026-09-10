@@ -1036,3 +1036,24 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 .ml-item b { color: var(--primary); min-width: 62px; }
 .ml-item .ml-meta { color: var(--text-3); font-size: 11.5px; }
 .ml-item.muted { color: var(--text-3); cursor: default; }
+.ml-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: #fafbfe;
+  position: sticky;
+  top: 0;
+}
+.ml-group {
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.ml-group.g-common { background: #ffe9e9; color: #d94a4a; }
+.ml-group.g-event { background: #fff3e0; color: #c47a00; }
+.ml-group.g-resource { background: #e8f3ff; color: #2563eb; }
+.ml-group.g-main { background: #eef0f6; color: #5b6478; }
+.ml-group.g-other { background: #f2f4f8; color: #7b8496; }

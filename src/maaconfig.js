@@ -277,12 +277,34 @@ function normalizeStageCode(input, levels) {
   return null;
 }
 
+// 关卡分组优先级（与主进程 loadMaaLevels 一致）：常用 → 活动 → 资源本 → 主线 → 其他
+const LEVEL_GROUP_RANK = { common: 0, event: 1, resource: 2, main: 3, other: 4 };
+
+function levelRank(l) {
+  return l && LEVEL_GROUP_RANK[l.group] !== undefined ? LEVEL_GROUP_RANK[l.group] : 5;
+}
+
+// 组内排序：活动本按"活动新旧"降序（最新活动在前），其余按代号自然序
+function levelCompare(a, b) {
+  const byGroup = levelRank(a) - levelRank(b);
+  if (byGroup) return byGroup;
+  if (a && b && a.group === 'event' && b.group === 'event') {
+    const byNew = (Number(b.eventOrder) || 0) - (Number(a.eventOrder) || 0);
+    if (byNew) return byNew;
+  }
+  return String(a && a.code).localeCompare(String(b && b.code), 'zh-CN', { numeric: true, sensitivity: 'base' });
+}
+
 // 搜索关卡：支持代号模糊匹配 + 掉落物名匹配，返回候选项（最多 limit 条）
 function searchLevels(keyword, levels, limit) {
   const list = Array.isArray(levels) ? levels : [];
   const max = Number.isFinite(limit) ? limit : 12;
   const raw = String(keyword == null ? '' : keyword).trim();
-  if (!raw) return list.slice(0, max);
+  const byGroup = levelCompare;
+  if (!raw) {
+    // 空关键词：常用 → 活动（最新活动优先）→ 资源本 → 主线 → 其他
+    return [...list].sort(byGroup).slice(0, max);
+  }
   const key = stageKey(raw);
   const lower = raw.toLowerCase();
   const scored = [];
@@ -296,7 +318,7 @@ function searchLevels(keyword, levels, limit) {
     else if ((l.stageId || '').toLowerCase().includes(lower)) score = 20;
     if (score > 0) scored.push({ score, level: l });
   }
-  scored.sort((a, b) => b.score - a.score || String(a.level.code).localeCompare(String(b.level.code)));
+  scored.sort((a, b) => b.score - a.score || levelCompare(a.level, b.level));
   return scored.slice(0, max).map((x) => x.level);
 }
 

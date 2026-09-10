@@ -1247,6 +1247,38 @@ ipcMain.handle('maa:configOpenDir', async () => {
 
 // ---- MAA 关卡清单（读 MAA 自带的 resource/stages.json，供"选关卡/自动修正"用） ----
 let maaLevelsCache = null;
+
+// 最常用的资源本 / 刷材料关（与 MAA 一样置顶）
+const COMMON_STAGE_CODES = new Set([
+  '1-7', 'CE-6', 'LS-5', 'AP-5', 'SK-5',
+  'PR-A-1', 'PR-A-2', 'PR-B-1', 'PR-B-2', 'PR-C-1', 'PR-C-2', 'PR-D-1', 'PR-D-2',
+]);
+const GROUP_RANK = { common: 0, event: 1, resource: 2, main: 3, other: 4 };
+const GROUP_LABEL = { common: '常用', event: '活动', resource: '资源本', main: '主线', other: '其他' };
+
+function classifyStage(code, stageId) {
+  const sid = String(stageId || '');
+  if (COMMON_STAGE_CODES.has(code)) return { group: 'common', groupLabel: GROUP_LABEL.common };
+  if (/^a\d{3}/i.test(sid) || /^act/i.test(sid) || /^act\d/i.test(code)) return { group: 'event', groupLabel: GROUP_LABEL.event };
+  if (/^wk_/i.test(sid)) return { group: 'resource', groupLabel: GROUP_LABEL.resource };
+  if (/^main_/i.test(sid)) return { group: 'main', groupLabel: GROUP_LABEL.main };
+  return { group: 'other', groupLabel: GROUP_LABEL.other };
+}
+
+// 活动关卡的新旧程度（用于把最新活动排在前面）：act14side_01 → 14；a001_01 → 1
+function eventOrderOf(stageId) {
+  const sid = String(stageId || '');
+  const m1 = /act(\d+)/i.exec(sid);
+  if (m1) return Number(m1[1]) || 0;
+  const m2 = /^a(\d{3})/i.exec(sid);
+  if (m2) return Number(m2[1]) || 0;
+  return 0;
+}
+
+function naturalCompare(a, b) {
+  return String(a).localeCompare(String(b), 'zh-CN', { numeric: true, sensitivity: 'base' });
+}
+
 function loadMaaLevels(force) {
   const mp = maaPrefsLocal();
   if (!mp.exePath) return { ok: false, error: '尚未配置 MAA 可执行文件路径' };
@@ -1270,15 +1302,31 @@ function loadMaaLevels(force) {
         const name = it && it.name ? it.name : null;
         if (name && !drops.includes(name)) drops.push(name);
       }
+      const code = String(s.code || '');
+      const stageId = String(s.stageId || '');
+      const cls = classifyStage(code, stageId);
       return {
-        code: String(s.code || ''),
-        stageId: String(s.stageId || ''),
+        code,
+        stageId,
         apCost: Number(s.apCost) || 0,
         drops: drops.slice(0, 4),
+        group: cls.group,
+        groupLabel: cls.groupLabel,
+        eventOrder: eventOrderOf(stageId),
       };
     }).filter((l) => l.code);
+    // 排序：常用资源本 → 活动本（最新活动优先）→ 其它资源本 → 主线 → 其他；同组按代号自然序
+    levels.sort((a, b) => {
+      const byGroup = GROUP_RANK[a.group] - GROUP_RANK[b.group];
+      if (byGroup) return byGroup;
+      if (a.group === 'event' && b.group === 'event') {
+        const byNew = (b.eventOrder || 0) - (a.eventOrder || 0);
+        if (byNew) return byNew;
+      }
+      return naturalCompare(a.code, b.code);
+    });
     maaLevelsCache = { dir, at: Date.now(), levels };
-    console.log('[maa] 已载入关卡清单', levels.length, '个');
+    console.log('[maa] 已载入关卡清单', levels.length, '个（常用', levels.filter((l) => l.group === 'common').length, '/ 活动', levels.filter((l) => l.group === 'event').length, '）');
     return { ok: true, ...maaLevelsCache };
   } catch (e) {
     return { ok: false, error: '关卡数据解析失败：' + (e && e.message ? e.message : e) };
