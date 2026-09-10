@@ -1198,14 +1198,79 @@ $('#btnSettings').addEventListener('click', async () => {
   await updateUpdateUI();
   await renderFestivalUI();
   await renderPluginList();
+  $('#settingsSaveHint').textContent = '';
+  $('#settingsSaveHint').classList.remove('warn');
   $('#settingsModal').hidden = false;
 });
 $('#sAutoStart').addEventListener('change', async (e) => {
+  const want = e.target.checked;
   try {
-    await window.api.setAutostart(e.target.checked);
+    const r = await window.api.setAutostart(want);
+    const real = !!(r && r.enabled);
+    if (real !== want) {
+      // 写入后回读不一致：把勾选框纠正成真实状态，别让界面骗人
+      e.target.checked = real;
+      alert(want
+        ? '开机自启没能写入系统启动项（可能被安全软件拦截）。\n可以手动把本程序的快捷方式放进「启动」文件夹（Win+R 输入 shell:startup）。'
+        : '关闭开机自启失败，系统启动项里仍然有本程序。');
+    }
   } catch (err) {
+    e.target.checked = !want;
     alert('设置开机自启失败：' + (err && err.message ? err.message : '未知错误'));
   }
+});
+
+// 设置面板：把面板上的值一次性保存，并回读校验开机自启的真实状态
+async function saveSettingsFromPanel() {
+  const notes = [];
+  const weekStart = Number($('#sWeekStart').value) === 0 ? 0 : 1;
+  const notifySound = $('#sNotifySound').checked;
+  prefs.weekStart = weekStart;
+  prefs.notifySound = notifySound;
+  try {
+    await window.api.setPrefs({ weekStart, notifySound });
+  } catch (e) {
+    notes.push('基础设置保存失败');
+  }
+
+  const want = $('#sAutoStart').checked;
+  try {
+    const r = await window.api.setAutostart(want);
+    const real = !!(r && r.enabled);
+    $('#sAutoStart').checked = real;
+    if (want && !real) notes.push('开机自启未生效（可能被安全软件拦截），已显示实际状态');
+    if (!want && real) notes.push('开机自启关闭失败，仍处于启用状态');
+  } catch (e) {
+    notes.push('开机自启设置失败：' + (e && e.message ? e.message : '未知错误'));
+  }
+  return { ok: notes.length === 0, notes };
+}
+
+$('#btnSettingsSave').addEventListener('click', async () => {
+  const btn = $('#btnSettingsSave');
+  const hint = $('#settingsSaveHint');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '保存中…';
+  hint.textContent = '';
+  hint.classList.remove('warn');
+  try {
+    const r = await saveSettingsFromPanel();
+    btn.textContent = r.ok ? '已保存 ✓' : '部分未生效';
+    hint.textContent = r.ok ? '设置已保存到本机' : r.notes.join('；');
+    hint.classList.toggle('warn', !r.ok);
+  } catch (e) {
+    btn.textContent = '保存失败';
+    hint.textContent = String((e && e.message) || e);
+    hint.classList.add('warn');
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 1800);
+  }
+});
+
+// 点「完成」关闭前静默再保存一次，避免改了却没落盘
+$('#btnSettingsDone').addEventListener('click', () => {
+  saveSettingsFromPanel().catch(() => {});
 });
 
 // ---------- 自定义提醒语音 ----------

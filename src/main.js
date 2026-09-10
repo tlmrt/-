@@ -19,6 +19,7 @@ const {
   holidaySourceList,
 } = require('./holidays');
 const { parseRelease, shouldNotify, errText, describeNetError } = require('./updater');
+const { launchConfig, autostartState } = require('./autostart');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
@@ -2197,21 +2198,19 @@ function closeWidgetById(id) {
 }
 
 // 开机自启：Windows 注册表启动项（Run），带 --hidden 参数实现后台静默
+// 注意：写入与读取必须共用同一份命令行（含 --hidden），否则 getLoginItemSettings
+// 因参数不匹配而回报"未启用"，表现为"勾了自启、重开设置又变回未勾选"
+function autostartLaunch() {
+  return launchConfig({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    appRoot: path.resolve(__dirname, '..'),
+  });
+}
+
 function applyAutostart(enabled) {
   try {
-    if (!app.isPackaged) {
-      // 开发模式：注册 electron.exe + 项目路径
-      app.setLoginItemSettings({
-        openAtLogin: !!enabled,
-        path: process.execPath,
-        args: [path.resolve(__dirname, '..'), '--hidden'],
-      });
-    } else {
-      app.setLoginItemSettings({
-        openAtLogin: !!enabled,
-        args: ['--hidden'],
-      });
-    }
+    app.setLoginItemSettings({ openAtLogin: !!enabled, ...autostartLaunch() });
     return true;
   } catch (e) {
     console.error('设置开机自启失败', e);
@@ -2219,15 +2218,50 @@ function applyAutostart(enabled) {
   }
 }
 
-ipcMain.handle('autostart:get', () => {
+// 读注册表 Run 项原文（Electron 匹配不上时用它兜底核对）
+function readRunEntries() {
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        'reg',
+        ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'],
+        { windowsHide: true },
+        (err, stdout) => resolve(err ? '' : String(stdout || ''))
+      );
+    } catch (e) {
+      resolve('');
+    }
+  });
+}
+
+// 当前是否真的会开机启动（Electron 判定 + 注册表兜底）
+async function autostartEnabled() {
+  const launch = autostartLaunch();
+  let openAtLogin = false;
   try {
-    const s = app.getLoginItemSettings();
-    return { enabled: !!(s && s.openAtLogin) };
+    const s = app.getLoginItemSettings(launch);
+    openAtLogin = !!(s && s.openAtLogin);
   } catch (e) {
-    return { enabled: false };
+    openAtLogin = false;
   }
+  if (openAtLogin) return { enabled: true, source: 'electron', path: launch.path };
+  const runOutput = await readRunEntries();
+  const st = autostartState({ openAtLogin: false, runOutput, execPath: launch.path });
+  return { enabled: st.enabled, source: st.source, path: launch.path };
+}
+
+ipcMain.handle('autostart:get', () => autostartEnabled());
+
+ipcMain.handle('autostart:set', async (e, flag) => {
+  const want = !!flag;
+  const ok = applyAutostart(want);
+  // 写完立刻回读，把真实状态回给渲染层——界面绝不假装成功
+  const now = await autostartEnabled();
+  if (want && !now.enabled) {
+    console.warn('[autostart] 已请求开启但注册表里没查到启动项，可能被安全软件拦截');
+  }
+  return { ok, enabled: now.enabled, source: now.source };
 });
-ipcMain.handle('autostart:set', (e, flag) => ({ ok: applyAutostart(!!flag) }));
 
 // ---------------- 启动 ----------------
 const startHidden = process.argv.includes('--hidden');
@@ -2270,6 +2304,11 @@ app.whenReady().then(() => {
   // 每天定时自动启动 MAA：每分钟检查一次（到点且今天未启动过才执行）
   setInterval(() => { checkDailyMaaStart(); }, 60 * 1000);
   setTimeout(() => { checkDailyMaaStart(); }, 15 * 1000);
+
+  // 开机自启状态：启动时打印一行，便于排查"勾了却显示未勾选"这类问题
+  autostartEnabled()
+    .then((s) => console.log(`[autostart] 开机自启：${s.enabled ? '已启用' : '未启用'}（来源：${s.source}）`))
+    .catch(() => {});
 
   // 自动检查更新：启动 12 秒后一次，之后每 6 小时一次；失败仅记录日志，不影响使用
   setTimeout(() => {

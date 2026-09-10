@@ -310,7 +310,7 @@
           <label>
             <input type="checkbox" id="sAutoStart" /> 开机自动启动（后台静默运行）
           </label>
-          <p class="hint">勾选后，开机进入系统时日历会在后台（托盘）自动运行、准时提醒但不弹窗口；点托盘图标即可打开界面。取消勾选即关闭开机自启。</p>
+          <p class="hint">勾选后，开机进入系统时日历会在后台（托盘）自动运行、准时提醒但不弹窗口；点托盘图标即可打开界面。取消勾选即关闭开机自启。这一项要写入 Windows 启动项，改完请点右下角「保存设置」，保存后会回读系统里的真实状态并把勾选框纠正过来。</p>
         </div>
         <div class="field">
           <label>插件（开源扩展口）</label>
@@ -325,7 +325,9 @@
         <p class="hint">提醒通过 Windows 系统通知发出，日历窗口最小化或隐藏到托盘也会准时提醒。关闭窗口 = 最小化到托盘（右下角图标），从托盘菜单「退出」才会真正退出。</p>
       </div>
       <div class="modal-foot">
-        <button type="button" class="primary-btn" data-close="settingsModal">完成</button>
+        <span class="save-hint" id="settingsSaveHint"></span>
+        <button type="button" class="ghost-btn" id="btnSettingsSave">保存设置</button>
+        <button type="button" class="primary-btn" id="btnSettingsDone" data-close="settingsModal">完成</button>
       </div>
     </div>
   </div>

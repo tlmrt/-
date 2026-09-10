@@ -1,13 +1,13 @@
 {
   "name": "evestudio-calendar",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "开源日历 — 桌面日历与任务到点提醒",
   "main": "src/main.js",
   "author": "EveStudio",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node test/reminder.test.js && node test/festivals.test.js && node test/holidays.test.js && node test/updater.test.js && node test/maa.test.js && node test/maaconfig.test.js && node test/localapi.test.js",
+    "test": "node test/reminder.test.js && node test/festivals.test.js && node test/holidays.test.js && node test/updater.test.js && node test/autostart.test.js && node test/maa.test.js && node test/maaconfig.test.js && node test/localapi.test.js",
     "dist": "electron-builder --win"
   },
   "build": {

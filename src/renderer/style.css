@@ -419,6 +419,16 @@ input, textarea, select { user-select: text; }
   border-top: 1px solid var(--border);
 }
 
+/* 设置面板底部的保存反馈 */
+.save-hint {
+  margin-right: auto;
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.save-hint.warn { color: #ff8f8f; }
+
 /* 提醒行 */
 .reminder-row {
   display: flex;
