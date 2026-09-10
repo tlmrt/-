@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld('api', {
   maaGlobalSet: (patch) => ipcRenderer.invoke('maa:globalSet', patch),
   maaStartNow: () => ipcRenderer.invoke('maa:startNow'),
   maaDailyCheck: () => ipcRenderer.invoke('maa:dailyCheck'),
+  // 打开外部链接
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   onMaaEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('maa:event', handler);

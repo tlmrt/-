@@ -1111,3 +1111,29 @@ body.dragging-widget .day-cell { cursor: grabbing; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 赞助页面 */
+.modal.sponsor-modal { width: 380px; }
+.sponsor-tip {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+.sponsor-img-wrap {
+  display: flex;
+  justify-content: center;
+  background: #fafbfe;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+#sponsorImg {
+  max-width: 100%;
+  max-height: 62vh;
+  border-radius: 8px;
+  cursor: zoom-in;
+  display: block;
+}
+.modal-foot .ghost-btn.small { margin-right: auto; }

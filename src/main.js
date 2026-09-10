@@ -1561,6 +1561,18 @@ ipcMain.handle('maa:startNow', () => {
 
 ipcMain.handle('maa:dailyCheck', () => checkDailyMaaStart());
 
+// 打开外部链接（赞助页 / 仓库等）
+ipcMain.handle('app:openExternal', async (e, url) => {
+  try {
+    const u = String(url || '').trim();
+    if (!/^https?:\/\//i.test(u)) return { ok: false, error: '仅支持 http/https 链接' };
+    await shell.openExternal(u);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
 ipcMain.handle('maa:pickExe', async () => {  if (!win) return { ok: false };
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: '选择 MAA 可执行文件（MAA.exe）',

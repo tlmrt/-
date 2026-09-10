@@ -1952,6 +1952,23 @@ $('#btnMaaPanelStop').addEventListener('click', async () => {
   await updateMaaUI();
 });
 
+// ---------- 赞助页面 ----------
+$('#btnSponsor').addEventListener('click', () => {
+  $('#sponsorModal').hidden = false;
+});
+$('#sponsorImg').addEventListener('click', () => {
+  showLightbox($('#sponsorImg').src); // 复用大图查看
+});
+$('#btnSponsorStar').addEventListener('click', async () => {
+  const repo = (prefs.update && prefs.update.repo) || '';
+  if (!repo) {
+    alert('还没有配置 GitHub 仓库。\n可在「⚙ 设置 → 应用更新」里填写仓库地址（用户名/仓库名），之后这里就能直接打开仓库页面。');
+    return;
+  }
+  const r = await window.api.openExternal(`https://github.com/${repo}`);
+  if (!r || !r.ok) alert('打开失败：' + ((r && r.error) || '未知错误'));
+});
+
 // ---------- 自动搜索电脑上的 MAA ----------
 async function detectMaa(scope) {
   const btn = scope === 'global' ? $('#btnMaaAutoDetectGlobal') : $('#btnMaaAutoDetect');

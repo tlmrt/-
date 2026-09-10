@@ -23,6 +23,7 @@
         <button class="icon-btn" id="btnNext" title="下个月">›</button>
       </div>
       <div class="top-actions">
+        <button class="icon-btn" id="btnSponsor" title="赞助支持作者">❤</button>
         <button class="icon-btn" id="btnMaaGlobal" title="MAA 全局设置（每天自动启动）">MAA</button>
         <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
       </div>
@@ -444,6 +445,27 @@
       <div class="modal-foot">
         <span class="hint" id="maaGlobalMsg" style="margin-right:auto"></span>
         <button type="button" class="primary-btn" data-close="maaGlobalModal">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 赞助页面 -->
+  <div class="modal-mask" id="sponsorModal" hidden>
+    <div class="modal modal-sm sponsor-modal">
+      <div class="modal-head">
+        <h3>❤ 赞助支持</h3>
+        <button class="icon-btn" data-close="sponsorModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="sponsor-tip">开源日历完全免费、开源（MIT 协议）。如果它帮到了你，欢迎扫码请作者喝杯咖啡 —— 每一份支持都是继续更新的动力 🙏</p>
+        <div class="sponsor-img-wrap">
+          <img id="sponsorImg" src="../../assets/sponsor.png" alt="赞助码" title="点击查看大图" />
+        </div>
+        <p class="hint">上图由作者提供，扫码即可赞助；点图片可放大查看。也欢迎到项目仓库点个 ⭐ Star。</p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="ghost-btn small" id="btnSponsorStar">⭐ 去仓库点 Star</button>
+        <button type="button" class="primary-btn" data-close="sponsorModal">关闭</button>
       </div>
     </div>
   </div>
