@@ -255,9 +255,10 @@
           <label>应用更新（直连 GitHub 仓库）</label>
           <label class="inline-check"><input type="checkbox" id="sAutoUpdate" /> 自动检查更新（启动时与每 6 小时）</label>
           <div class="theme-custom">
-            <input type="text" id="updRepo" placeholder="GitHub 仓库：用户名/仓库名" />
-            <button type="button" class="ghost-btn small" id="btnUpdSaveRepo">保存</button>
+            <input type="text" id="updRepo" placeholder="GitHub 仓库：用户名/仓库名" readonly />
+            <button type="button" class="ghost-btn small" id="btnUpdSaveRepo" hidden>保存</button>
           </div>
+          <p class="hint">仓库地址已由发行方锁定，不可修改；更新检查与「⭐ 去仓库点 Star」都使用它。</p>
           <div class="holi-status" id="updStatus">当前版本读取中…</div>
           <div class="theme-custom">
             <button type="button" class="ghost-btn small" id="btnUpdCheck">检查更新</button>

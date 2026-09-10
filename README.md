@@ -111,9 +111,12 @@ npm run dist       # 打包 Windows 安装包(NSIS) + 便携版 → release/
 
 ## 📜 开源与贡献
 
+- 项目主页：**https://github.com/tlmrt/-**
 - MIT License，见 [LICENSE](LICENSE)。
-- 仓库由维护者管理，**写权限仅限维护者本人**；欢迎所有人 Fork 与提交 Pull Request / Issue 参与改进，合并由维护者审阅后执行。
-- 尚未推送远程仓库（维护者暂无 GitHub 账号），就绪后按"公开仓库、仅维护者可改"发布。
+- 仓库由维护者管理，**写权限仅限维护者本人**；欢迎 Fork 与提交 Pull Request / Issue 参与改进，合并由维护者审阅后执行。
+- 应用内「设置 → 应用更新」的仓库地址已**锁定**为该仓库，用于检查更新与「⭐ 去仓库点 Star」。
+
+> ⚠️ 若本机 git 配置了 `url.*.insteadOf` 镜像重写（会把 github.com 地址改写掉），推送请先运行仓库根目录的 `push-to-github.ps1`，它会跳过全局配置直连 GitHub。
 
 ## ❤ 赞助支持
 

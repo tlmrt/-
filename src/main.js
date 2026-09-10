@@ -519,6 +519,8 @@ ipcMain.handle('holidays:openDir', async () => {
 
 // ---------------- 应用更新（直连 GitHub 仓库） ----------------
 const DEFAULT_UPDATE_PREFS = { autoCheck: true, repo: '', lastCheck: null, ignoredVersion: null };
+// 发行方锁定的 GitHub 仓库（设置里不可修改，更新检查/Star 均使用它）
+const LOCKED_UPDATE_REPO = 'tlmrt/-';
 const updateState = { lastResult: null, downloadedFile: null, progress: 0, checking: false };
 
 // 外部联动：本地 HTTP 接口 + MAA 控制
@@ -540,7 +542,9 @@ function updatePrefs() {
   const u = prefs.update && typeof prefs.update === 'object' ? prefs.update : {};
   return {
     autoCheck: u.autoCheck !== false,
-    repo: typeof u.repo === 'string' ? u.repo.trim() : '',
+    // 仓库地址由发行方锁定，忽略本地存储值（避免被随意改动导致更新/Star 失效）
+    repo: LOCKED_UPDATE_REPO,
+    locked: true,
     lastCheck: u.lastCheck || null,
     ignoredVersion: u.ignoredVersion || null,
   };
@@ -617,7 +621,10 @@ ipcMain.handle('update:ignore', (e, version) => {
 });
 
 ipcMain.handle('update:setPrefs', (e, patch) => {
-  prefs.update = { ...updatePrefs(), ...(patch || {}) };
+  const next = { ...updatePrefs(), ...(patch || {}) };
+  // 仓库地址锁定：始终以发行方配置为准
+  next.repo = LOCKED_UPDATE_REPO;
+  prefs.update = { ...next };
   savePrefs();
   return { ok: true, prefs: updatePrefs() };
 });

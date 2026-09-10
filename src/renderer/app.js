@@ -2145,7 +2145,8 @@ async function updateUpdateUI() {
   try { st = await window.api.updateStatus(); } catch (e) { st = null; }
   if (!st) { $('#updStatus').textContent = '更新状态读取失败'; return; }
   $('#sAutoUpdate').checked = st.autoCheck !== false;
-  if (document.activeElement !== $('#updRepo')) $('#updRepo').value = st.repo || '';
+  $('#updRepo').value = st.repo || '';
+  $('#updRepo').readOnly = true; // 仓库地址由发行方锁定
   const last = st.lastCheck ? new Date(st.lastCheck).toLocaleString() : '从未';
   const r = st.lastResult;
   let txt = `当前版本 v${st.current} · 上次检查：${last}`;
@@ -2171,22 +2172,17 @@ $('#sAutoUpdate').addEventListener('change', async (e) => {
 });
 
 $('#btnUpdSaveRepo').addEventListener('click', async () => {
-  const repo = $('#updRepo').value.trim()
-    .replace(/^https?:\/\/github\.com\//i, '')
-    .replace(/\.git$/i, '')
-    .replace(/\/+$/, '');
-  if (repo && !/^[^\s/]+\/[^\s/]+$/.test(repo)) { alert('仓库格式应为：用户名/仓库名'); return; }
-  await window.api.setUpdatePrefs({ repo });
-  $('#updRepo').value = repo;
-  await updateUpdateUI();
-  if (repo) {
-    const r = await window.api.checkUpdate();
-    await updateUpdateUI();
-    if (r && r.ok && r.hasUpdate) showUpdateToast(r);
-    else if (r && r.ok) alert(`已是最新版本 v${r.latest}（当前 v${r.current}）`);
-    else alert('检查更新失败：' + ((r && r.error) || '未知错误'));
-  }
+  alert('仓库地址已由发行方锁定，无法修改。');
 });
+
+// 旧的"填写仓库并立即检查"入口已随锁定取消，保留此处用于即时检查
+async function checkUpdateNow() {
+  const r = await window.api.checkUpdate();
+  await updateUpdateUI();
+  if (r && r.ok && r.hasUpdate) showUpdateToast(r);
+  else if (r && r.ok) alert(`已是最新版本 v${r.latest}（当前 v${r.current}）`);
+  else alert('检查更新失败：' + ((r && r.error) || '未知错误'));
+}
 
 $('#btnUpdCheck').addEventListener('click', async () => {
   const btn = $('#btnUpdCheck');
