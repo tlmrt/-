@@ -583,7 +583,9 @@ function openTaskModal(task) {
   $('#fId').value = task ? task.id : '';
   $('#fTitle').value = task ? task.title : '';
   $('#fDate').value = task ? task.date : selectedDate;
-  const defaultTime = task ? task.time : '09:00';
+  // 新建任务时默认使用"当前时间"
+  const now = new Date();
+  const defaultTime = task ? task.time : `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   $('#fTime').value = defaultTime;
   $('#fRepeat').value = task ? (task.repeat || 'none') : 'none';
   $('#fPriority').value = task ? (task.priority || 'medium') : 'medium';
@@ -1545,6 +1547,14 @@ async function ensureMaaLevels(force, alwaysCheck) {
 }
 
 // 关卡匹配（与 src/maaconfig.js 同规则）
+// 关卡开放状态标签
+function openStateHtml(l) {
+  if (!l) return '';
+  if (l.openState === 'open') return '<span class="ml-open is-open">开放中</span>';
+  if (l.openState === 'past') return '<span class="ml-open is-past">往期</span>';
+  return '<span class="ml-open is-always">常驻</span>';
+}
+
 function stageKeyLocal(s) {
   return String(s == null ? '' : s).toUpperCase().replace(/[\s\-_]/g, '');
 }
@@ -1562,7 +1572,7 @@ function normalizeStageCodeLocal(input) {
 
 function searchLevelsLocal(keyword) {
   const raw = String(keyword == null ? '' : keyword).trim();
-  const rank = { current: 0, common: 1, event: 2, resource: 3, main: 4, other: 5 };
+  const rank = { current: 0, common: 1, special: 2, event: 3, resource: 4, main: 5, other: 6 };
   const rankOf = (l) => (rank[l.group] !== undefined ? rank[l.group] : 5);
   const byGroup = (a, b) => {
     const g = rankOf(a) - rankOf(b);
@@ -1711,7 +1721,8 @@ function bindLevelsWidget(scope) {
       chips.innerHTML = list.length
         ? list.map((c, i) => {
           const info = maaLevels.find((l) => l.code === c);
-          const tip = `第 ${i + 1} 个执行${info && info.groupLabel ? ' · ' + info.groupLabel : ''}${info && info.apCost ? ' · ' + info.apCost + ' 理智' : ''}`;
+          const stateTxt = info ? (info.openState === 'open' ? '开放中' : info.openState === 'past' ? '往期' : '常驻') : '';
+          const tip = `第 ${i + 1} 个执行${info && info.groupLabel ? ' · ' + info.groupLabel : ''}${stateTxt ? ' · ' + stateTxt : ''}${info && info.apCost ? ' · ' + info.apCost + ' 理智' : ''}`;
           return `<span class="ml-chip" title="${esc(tip)}">${esc(c)}<b data-i="${i}">✕</b></span>`;
         }).join('')
         : '<span class="ml-empty">还没有选择关卡</span>';
@@ -1743,10 +1754,11 @@ function bindLevelsWidget(scope) {
         return;
       }
       sug.hidden = false;
-      const groupHint = '<div class="ml-hint">按「当期活动 → 常用 → 活动 → 资源本 → 主线」排列</div>';
+      const groupHint = '<div class="ml-hint">按「当期活动 → 常用 → 剿灭 → 活动 → 资源本 → 主线」排列（已标注开放状态）</div>';
       sug.innerHTML = groupHint + hits.map((l) => `<div class="ml-item" data-code="${esc(l.code)}">
           <b>${esc(l.code)}</b>
           ${l.groupLabel ? `<span class="ml-group g-${esc(l.group || 'other')}">${esc(l.groupLabel)}</span>` : ''}
+          ${openStateHtml(l)}
           <span class="ml-meta">${l.apCost ? l.apCost + ' 理智' : ''}${(l.drops || []).length ? ' · ' + esc((l.drops || []).slice(0, 3).join(' / ')) : ''}</span>
         </div>`).join('');
       sug.querySelectorAll('.ml-item[data-code]').forEach((it) => {
@@ -1909,6 +1921,77 @@ $('#btnMaaPanelStop').addEventListener('click', async () => {
   const r = await window.api.maaStop();
   $('#maaPanelMsg').textContent = (!r || !r.ok) ? ('停止失败：' + ((r && r.error) || '未知错误')) : '已停止 MAA';
   await updateMaaUI();
+});
+
+// ---------- MAA 全局设置（每天定时自动启动） ----------
+async function renderMaaGlobal() {
+  $('#maaGlobalMsg').textContent = '';
+  let d = null;
+  try { d = await window.api.maaGlobalGet(); } catch (e) { d = null; }
+  if (!d || !d.ok) { $('#maaGlobalStatus').textContent = '读取失败'; return; }
+  const g = d.global || {};
+  $('#sMaaDaily').checked = !!g.dailyEnabled;
+  $('#maaDailyTime').value = g.dailyTime || '08:00';
+  const sel = $('#maaDailyConfig');
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = '（不切换，使用 MAA 当前配置）';
+  sel.appendChild(none);
+  (d.configs || []).forEach((n) => {
+    const o = document.createElement('option');
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  });
+  if (g.configName && !(d.configs || []).includes(g.configName)) {
+    const o = document.createElement('option');
+    o.value = g.configName;
+    o.textContent = g.configName + '（未找到）';
+    sel.appendChild(o);
+  }
+  sel.value = g.configName || '';
+  const boundDays = Object.keys(d.dateConfigs || {}).length;
+  const last = g.lastRunDate ? `上次自动启动：${g.lastRunDate}` : '尚未自动启动过';
+  $('#maaGlobalStatus').textContent =
+    `MAA ${d.maaConfigured ? '路径已配置' : '未配置路径'} · 默认任务名「${d.autoStartTask}」 · ${d.skipIfRunning ? '已在运行则跳过' : '不跳过已运行'} · ${last}`
+    + (boundDays ? ` · 已有 ${boundDays} 天绑定专属配置（优先级更高）` : '')
+    + (d.configError ? ` · 配置读取：${d.configError}` : '');
+}
+
+$('#btnMaaGlobal').addEventListener('click', async () => {
+  $('#maaGlobalModal').hidden = false;
+  await renderMaaGlobal();
+});
+$('#sMaaDaily').addEventListener('change', async (e) => {
+  await window.api.maaGlobalSet({ dailyEnabled: e.target.checked });
+  await renderMaaGlobal();
+});
+$('#maaDailyTime').addEventListener('change', async (e) => {
+  await window.api.maaGlobalSet({ dailyTime: e.target.value || '08:00' });
+  await renderMaaGlobal();
+});
+$('#maaDailyConfig').addEventListener('change', async (e) => {
+  await window.api.maaGlobalSet({ configName: e.target.value });
+  await renderMaaGlobal();
+});
+$('#btnMaaDailyStartNow').addEventListener('click', async () => {
+  const r = await window.api.maaStartNow();
+  $('#maaGlobalMsg').textContent = (!r || !r.ok)
+    ? ('启动失败：' + ((r && r.error) || '未知错误'))
+    : (r.skipped ? 'MAA 已在运行，已跳过' : `已启动 MAA（PID ${r.pid}）`);
+  await renderMaaGlobal();
+});
+$('#btnMaaDailyCheck').addEventListener('click', async () => {
+  const r = await window.api.maaDailyCheck();
+  $('#maaGlobalMsg').textContent = (!r || r.ok === false)
+    ? ('执行失败：' + ((r && r.error) || '未知错误'))
+    : (r.skipped ? ('未启动：' + r.skipped) : (r.pid ? `已启动 MAA（PID ${r.pid}）` : '已执行检查'));
+  await renderMaaGlobal();
+});
+$('#btnMaaGlobalOpenPanel').addEventListener('click', () => {
+  $('#maaGlobalModal').hidden = true;
+  openMaaPanel(selectedDate);
 });
 
 // ---------- 应用更新 ----------

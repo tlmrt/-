@@ -23,6 +23,7 @@
         <button class="icon-btn" id="btnNext" title="下个月">›</button>
       </div>
       <div class="top-actions">
+        <button class="icon-btn" id="btnMaaGlobal" title="MAA 全局设置（每天自动启动）">MAA</button>
         <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
       </div>
     </header>
@@ -406,6 +407,39 @@
       </div>
       <div class="modal-foot">
         <button type="button" class="primary-btn" data-close="festModal">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAA 全局设置（每天定时自动启动） -->
+  <div class="modal-mask" id="maaGlobalModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>MAA 全局设置</h3>
+        <button class="icon-btn" data-close="maaGlobalModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label class="inline-check"><input type="checkbox" id="sMaaDaily" /> 每天定时自动启动 MAA 并执行任务</label>
+          <div class="theme-custom">
+            <span class="opacity-label">启动时间</span>
+            <input type="time" id="maaDailyTime" />
+            <span class="opacity-label">使用配置</span>
+            <select id="maaDailyConfig"></select>
+          </div>
+          <p class="hint">到设定时间后，日历会自动切到你选择的这套 MAA 配置并启动 MAA（MAA 内已开启「运行前直接开始」时会自动开跑）。<b>优先级说明</b>：如果某天在日历右侧 🎮 面板里绑定了专属配置，那么该天的任务提醒会改用专属配置，本全局设置只在没有专属绑定的日子生效。</p>
+        </div>
+        <div class="holi-status" id="maaGlobalStatus">读取中…</div>
+        <div class="theme-custom">
+          <button type="button" class="primary-btn small" id="btnMaaDailyStartNow">立即按此设置启动一次</button>
+          <button type="button" class="ghost-btn small" id="btnMaaDailyCheck">检查是否该启动</button>
+          <button type="button" class="ghost-btn small" id="btnMaaGlobalOpenPanel">打开 MAA 任务面板</button>
+        </div>
+        <p class="hint">提示：任务里加了「🎮 启动 MAA」提醒的话，到点也会启动 MAA；两者都开启时，MAA 已在运行会自动跳过重复启动。</p>
+      </div>
+      <div class="modal-foot">
+        <span class="hint" id="maaGlobalMsg" style="margin-right:auto"></span>
+        <button type="button" class="primary-btn" data-close="maaGlobalModal">完成</button>
       </div>
     </div>
   </div>

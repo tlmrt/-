@@ -47,6 +47,16 @@ console.log('\n[3] 配置归一化');
   ok('日期绑定配置：trim', normalizeMaaPrefs({ dateConfigs: { '2026-09-13': ' 日常 ' } }).dateConfigs['2026-09-13'] === '日常');
   ok('日期绑定配置：过滤非法键值', Object.keys(normalizeMaaPrefs({ dateConfigs: { 'bad': 'x', '2026-09-12': '  ', '2026-1-1': 'y' } }).dateConfigs).length === 0);
   ok('日期绑定配置：缺省为空对象', Object.keys(normalizeMaaPrefs(null).dateConfigs).length === 0);
+
+  // 全局设置（每天定时自动启动）
+  const g1 = normalizeMaaPrefs(null).global;
+  ok('全局设置默认关闭', g1.dailyEnabled === false && g1.dailyTime === '08:00' && g1.configName === '' && g1.lastRunDate === '');
+  const g2 = normalizeMaaPrefs({ global: { dailyEnabled: true, dailyTime: '7:05', configName: ' 日常 ', lastRunDate: '2026-09-12' } }).global;
+  ok('全局设置：开关与时间补零', g2.dailyEnabled === true && g2.dailyTime === '07:05');
+  ok('全局设置：配置名去空格', g2.configName === '日常');
+  ok('全局设置：记录上次启动日期', g2.lastRunDate === '2026-09-12');
+  ok('全局设置：非法时间回退默认', normalizeMaaPrefs({ global: { dailyTime: 'abc' } }).global.dailyTime === '08:00');
+  ok('未知字段不会影响 global 结构', typeof normalizeMaaPrefs({ global: { foo: 1 } }).global.dailyEnabled === 'boolean');
 }
 
 console.log('\n[3.5] 任务级 MAA 联动配置');

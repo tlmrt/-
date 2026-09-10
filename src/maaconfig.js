@@ -277,8 +277,8 @@ function normalizeStageCode(input, levels) {
   return null;
 }
 
-// 关卡分组优先级（与主进程 loadMaaLevels 一致）：当期活动 → 常用 → 活动 → 资源本 → 主线 → 其他
-const LEVEL_GROUP_RANK = { current: 0, common: 1, event: 2, resource: 3, main: 4, other: 5 };
+// 关卡分组优先级（与主进程 loadMaaLevels 一致）：当期活动 → 常用 → 剿灭 → 活动 → 资源本 → 主线 → 其他
+const LEVEL_GROUP_RANK = { current: 0, common: 1, special: 2, event: 3, resource: 4, main: 5, other: 6 };
 
 function levelRank(l) {
   return l && LEVEL_GROUP_RANK[l.group] !== undefined ? LEVEL_GROUP_RANK[l.group] : 5;

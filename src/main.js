@@ -785,6 +785,51 @@ function maaStartWithOptions(taskName, opts) {
   return r;
 }
 
+// 切到指定名字的 MAA 配置（供全局设置/日期绑定共用）
+function applyConfigByName(name) {
+  if (!name) return { ok: true, applied: false, current: null };
+  const r = readMaaConfig();
+  if (!r.ok) return r;
+  const { json, ps } = r;
+  if (!json.Configurations || !json.Configurations[name]) return { ok: false, error: 'MAA 配置不存在：' + name };
+  if (json.Current === name) return { ok: true, applied: true, current: name };
+  json.Current = name;
+  const w = writeMaaConfig(ps, json);
+  if (!w.ok) return w;
+  return { ok: true, applied: true, current: name };
+}
+
+// 每天定时自动启动 MAA（用全局设置里的配置；优先级低于按日期绑定的专属配置）
+function checkDailyMaaStart() {
+  try {
+    const mp = maaPrefsLocal();
+    const g = mp.global || {};
+    if (!g.dailyEnabled || !g.dailyTime) return { ok: true, skipped: '未开启每日自动启动' };
+    const now = dayjs();
+    const today = now.format('YYYY-MM-DD');
+    if (g.lastRunDate === today) return { ok: true, skipped: '今天已自动启动过' };
+    const due = dayjs(`${today}T${g.dailyTime}:00`);
+    if (!due.isValid() || now.isBefore(due)) return { ok: true, skipped: '还没到设定时间' };
+    if (!mp.exePath || !fs.existsSync(mp.exePath)) {
+      console.log('[maa] 每日自动启动跳过：尚未配置 MAA 路径');
+      return { ok: false, error: '尚未配置 MAA 路径' };
+    }
+    if (g.configName) {
+      const applied = applyConfigByName(g.configName);
+      if (applied && applied.ok === false) console.error('[maa] 每日自动启动切换配置失败：', applied.error);
+    }
+    const r = maaStartWithOptions(mp.autoStartTask, {});
+    console.log('[maa] 每日自动启动（' + g.dailyTime + '）→', JSON.stringify(r));
+    if (win && !win.isDestroyed()) win.webContents.send('maa:event', { taskId: null, title: '每日自动启动', result: r });
+    prefs.maa = { ...mp, global: { ...g, lastRunDate: today } };
+    savePrefs();
+    return r;
+  } catch (e) {
+    console.error('[maa] 每日自动启动失败', e);
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
 // 任务到点：启动 MAA（opts.force=true 表示由「启动 MAA」提醒项触发，不受旧任务级开关限制）
 function maybeStartMaaForTask(task, opts) {
   try {
@@ -1253,9 +1298,9 @@ const COMMON_STAGE_CODES = new Set([
   '1-7', 'CE-6', 'LS-6', 'AP-5', 'SK-5',
   'PR-A-1', 'PR-A-2', 'PR-B-1', 'PR-B-2', 'PR-C-1', 'PR-C-2', 'PR-D-1', 'PR-D-2',
 ]);
-// 分组优先级：当期活动 → 常用资源本 → 其它活动 → 资源本 → 主线 → 其他
-const GROUP_RANK = { current: 0, common: 1, event: 2, resource: 3, main: 4, other: 5 };
-const GROUP_LABEL = { current: '当期活动', common: '常用', event: '活动', resource: '资源本', main: '主线', other: '其他' };
+// 分组优先级：当期活动 → 常用资源本 → 剿灭 → 其它活动 → 资源本 → 主线 → 其他
+const GROUP_RANK = { current: 0, common: 1, special: 2, event: 3, resource: 4, main: 5, other: 6 };
+const GROUP_LABEL = { current: '当期活动', common: '常用', special: '剿灭', event: '活动', resource: '资源本', main: '主线', other: '其他' };
 
 function classifyStage(code, stageId) {
   const sid = String(stageId || '');
@@ -1347,6 +1392,26 @@ function loadMaaLevels(opts) {
       }
     }
 
+    // 剿灭作战：MAA 的 stages.json 不含剿灭关卡，用 MAA 官方默认代号 Annihilation
+    if (!levels.some((l) => l.code === 'Annihilation')) {
+      levels.push({
+        code: 'Annihilation',
+        stageId: 'annihilation',
+        apCost: 0,
+        drops: [],
+        group: 'special',
+        groupLabel: GROUP_LABEL.special,
+        eventOrder: 0,
+      });
+    }
+
+    // 开放状态：当期活动=开放中；其它活动=往期；其余=常驻
+    for (const l of levels) {
+      if (l.group === 'current') l.openState = 'open';
+      else if (l.group === 'event') l.openState = 'past';
+      else l.openState = 'always';
+    }
+
     // 排序：当期活动 → 常用资源本 → 其它活动（最新优先）→ 资源本 → 主线 → 其他
     levels.sort((a, b) => {
       const byGroup = GROUP_RANK[a.group] - GROUP_RANK[b.group];
@@ -1375,6 +1440,37 @@ ipcMain.handle('maa:levels', (e, opts) => {
     ? { ok: true, count: r.levels.length, levels: r.levels, refreshed: !!r.refreshed, at: r.at }
     : r;
 });
+
+// ---- MAA 全局设置（每天定时自动启动 + 使用的全局配置） ----
+ipcMain.handle('maa:globalGet', () => {
+  const mp = maaPrefsLocal();
+  const r = readMaaConfig();
+  return {
+    ok: true,
+    global: mp.global,
+    configs: r.ok ? Object.keys(r.json.Configurations || {}) : [],
+    configError: r.ok ? '' : r.error,
+    maaConfigured: !!(mp.exePath && fs.existsSync(mp.exePath)),
+    autoStartTask: mp.autoStartTask,
+    skipIfRunning: mp.skipIfRunning,
+    dateConfigs: mp.dateConfigs,
+  };
+});
+
+ipcMain.handle('maa:globalSet', (e, patch) => {
+  const mp = maaPrefsLocal();
+  prefs.maa = normalizeMaaPrefs({ ...mp, global: { ...mp.global, ...(patch || {}) } });
+  savePrefs();
+  return { ok: true, global: maaPrefsLocal().global };
+});
+
+ipcMain.handle('maa:startNow', () => {
+  const mp = maaPrefsLocal();
+  if (mp.global && mp.global.configName) applyConfigByName(mp.global.configName);
+  return maaStartWithOptions(mp.autoStartTask, {});
+});
+
+ipcMain.handle('maa:dailyCheck', () => checkDailyMaaStart());
 
 ipcMain.handle('maa:pickExe', async () => {  if (!win) return { ok: false };
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
@@ -2001,6 +2097,10 @@ app.whenReady().then(() => {
   tick(); // 立即跑一次（含启动补发）
 
   startApiServer(); // 启动本地联动接口（可在设置里关闭）
+
+  // 每天定时自动启动 MAA：每分钟检查一次（到点且今天未启动过才执行）
+  setInterval(() => { checkDailyMaaStart(); }, 60 * 1000);
+  setTimeout(() => { checkDailyMaaStart(); }, 15 * 1000);
 
   // 自动检查更新：启动 12 秒后一次，之后每 6 小时一次；失败仅记录日志，不影响使用
   setTimeout(() => {

@@ -1058,3 +1058,21 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 .ml-group.g-resource { background: #e8f3ff; color: #2563eb; }
 .ml-group.g-main { background: #eef0f6; color: #5b6478; }
 .ml-group.g-other { background: #f2f4f8; color: #7b8496; }
+.ml-group.g-special { background: #efe7ff; color: #6d38d6; }
+.ml-open {
+  font-size: 10.5px;
+  border-radius: 5px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.ml-open.is-open { background: #e6f7ee; color: #12855a; font-weight: 700; }
+.ml-open.is-past { background: #f4f5f8; color: #9aa1b0; }
+.ml-open.is-always { background: #eef4ff; color: #4a6cf7; }
+.theme-custom input[type="time"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}

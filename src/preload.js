@@ -58,6 +58,11 @@ contextBridge.exposeInMainWorld('api', {
   maaSetDateConfig: (date, name) => ipcRenderer.invoke('maa:setDateConfig', { date, name }),
   maaStartForDate: (date) => ipcRenderer.invoke('maa:startForDate', date),
   maaLevels: (force) => ipcRenderer.invoke('maa:levels', { force: !!force }),
+  // MAA 全局设置（每天定时自动启动）
+  maaGlobalGet: () => ipcRenderer.invoke('maa:globalGet'),
+  maaGlobalSet: (patch) => ipcRenderer.invoke('maa:globalSet', patch),
+  maaStartNow: () => ipcRenderer.invoke('maa:startNow'),
+  maaDailyCheck: () => ipcRenderer.invoke('maa:dailyCheck'),
   onMaaEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('maa:event', handler);

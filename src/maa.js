@@ -53,6 +53,17 @@ function normalizeMaaPrefs(p) {
       }
     }
   }
+  // 全局设置：每天定时自动启动 MAA（优先级低于"按日期绑定的专属配置"）
+  const g = s.global && typeof s.global === 'object' ? s.global : {};
+  const dailyTime = typeof g.dailyTime === 'string' && /^\d{1,2}:\d{2}$/.test(g.dailyTime.trim())
+    ? g.dailyTime.trim().padStart(5, '0')
+    : '08:00';
+  const global = {
+    dailyEnabled: !!g.dailyEnabled,
+    dailyTime,
+    configName: typeof g.configName === 'string' ? g.configName.trim() : '',
+    lastRunDate: typeof g.lastRunDate === 'string' ? g.lastRunDate : '',
+  };
   return {
     exePath: typeof s.exePath === 'string' ? s.exePath : '',
     argsTemplate: typeof s.argsTemplate === 'string' ? s.argsTemplate : '',
@@ -62,6 +73,7 @@ function normalizeMaaPrefs(p) {
     autoStopMin: Number.isFinite(autoStopMin) && autoStopMin >= 0 ? Math.min(1440, Math.round(autoStopMin)) : 0,
     skipIfRunning: s.skipIfRunning !== false, // 已在运行时不重复启动
     dateConfigs, // { 'YYYY-MM-DD': 'MAA 配置名' }
+    global,
   };
 }
 

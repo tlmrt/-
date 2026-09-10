@@ -154,6 +154,16 @@ console.log('\n[8] 关卡分组排序（常用 / 活动 置顶，与 MAA 一致�
   ok('当期活动排在常用本之前', s0[0].group === 'current' && s0[0].code === 'BI-1', s0.map((l) => l.code).join(','));
   ok('当期活动内部按代号排序', s0[1].code === 'BI-2');
 
+  // 剿灭（special）排在常用之后、活动之前
+  const withSpecial = [
+    { code: 'CE-6', stageId: 'wk_melee_6', group: 'common' },
+    { code: 'Annihilation', stageId: 'annihilation', group: 'special' },
+    { code: 'BI-1', stageId: 'act14side_01_perm', group: 'current', eventOrder: 14 },
+    { code: 'GT-1', stageId: 'a001_01_perm', group: 'event', eventOrder: 1 },
+  ];
+  const s3 = searchLevels('', withSpecial);
+  ok('排序：当期活动 → 常用 → 剿灭 → 活动', s3.map((l) => l.code).join(',') === 'BI-1,CE-6,Annihilation,GT-1', s3.map((l) => l.code).join(','));
+
   // 同等匹配强度时，常用组优先
   const s2 = searchLevels('-', levels);
   ok('模糊搜索同样按分组排序', s2[0].group === 'common', JSON.stringify(s2.map((l) => l.code)));
