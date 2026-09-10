@@ -506,13 +506,16 @@ function renderDayPanel() {
       </div>
       ${t.note ? `<div class="tc-note">${esc(t.note)}</div>` : ''}
       <div class="tc-bottom">
-        <div class="tc-tags">${tagHtml}</div>
+        <div class="tc-tags">${tagHtml}${t.maa && t.maa.enabled ? `<span class="maa-tag" title="到点自动启动 MAA：${esc(t.maa.task)}">🎮 ${esc(t.maa.task)}</span>` : ''}</div>
         <div class="tc-actions">
+          ${t.maa && t.maa.enabled ? '<button class="mini-btn" data-act="maa" title="立即启动 MAA">▶</button>' : ''}
           <button class="mini-btn" data-act="edit" title="编辑">✎</button>
           <button class="mini-btn del" data-act="del" title="删除">🗑</button>
         </div>
       </div>`;
     box.appendChild(el);
+    const maaBtn = el.querySelector('[data-act="maa"]');
+    if (maaBtn) maaBtn.addEventListener('click', () => runMaaForTask(t));
     el.querySelector('[data-act="edit"]').addEventListener('click', () => openTaskModal(t));
     el.querySelector('[data-act="del"]').addEventListener('click', () => askDelete(t));
   });
@@ -570,8 +573,37 @@ function openTaskModal(task) {
     ? task.reminders.map((r) => ({ id: r.id, offsetMinutes: Number(r.offsetMinutes) || 0 }))
     : [{ id: 'r0', offsetMinutes: 0 }];
   renderReminders();
+
+  // MAA 联动（任务级）
+  renderMaaTaskField(task);
+
   $('#taskModal').hidden = false;
 }
+
+// 任务弹窗里的 MAA 联动字段
+function renderMaaTaskField(task) {
+  const cur = (task && task.maa) || {};
+  const preset = (prefs.maa && Array.isArray(prefs.maa.tasks)) ? prefs.maa.tasks : [];
+  const enabled = !!cur.enabled;
+  $('#fMaaEnabled').checked = enabled;
+  $('#maaTaskWrap').hidden = !enabled;
+  const names = [...new Set([...(cur.task ? [cur.task] : []), ...preset])];
+  if (!names.length) names.push((prefs.maa && prefs.maa.autoStartTask) || '默认');
+  const sel = $('#fMaaTask');
+  sel.innerHTML = '';
+  names.forEach((n) => {
+    const o = document.createElement('option');
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  });
+  sel.value = cur.task || names[0];
+  $('#fMaaAutoStop').value = cur.autoStopMin ? String(cur.autoStopMin) : '';
+}
+
+$('#fMaaEnabled').addEventListener('change', (e) => {
+  $('#maaTaskWrap').hidden = !e.target.checked;
+});
 
 function closeModal(id) {
   document.getElementById(id).hidden = true;
@@ -621,6 +653,11 @@ $('#taskForm').addEventListener('submit', async (e) => {
     priority: $('#fPriority').value,
     repeat: $('#fRepeat').value,
     reminders: remindDraft.map((r) => ({ id: r.id, offsetMinutes: r.offsetMinutes })),
+    maa: {
+      enabled: $('#fMaaEnabled').checked,
+      task: $('#fMaaTask').value || ((prefs.maa && prefs.maa.autoStartTask) || '默认'),
+      autoStopMin: Math.max(0, Math.round(Number($('#fMaaAutoStop').value) || 0)),
+    },
   };
   await window.api.saveTask(payload);
   window.eveBus.emit('eve:task-saved', payload);
@@ -1354,13 +1391,80 @@ async function updateMaaUI() {
     if (document.activeElement !== $('#maaExe')) $('#maaExe').value = st.exePath || '';
     if (document.activeElement !== $('#maaArgs')) $('#maaArgs').value = st.argsTemplate || '';
     if (document.activeElement !== $('#maaTask')) $('#maaTask').value = st.autoStartTask || '默认';
+    if (document.activeElement !== $('#maaAutoStopMin')) $('#maaAutoStopMin').value = String(st.autoStopMin || 0);
+    $('#maaSkipRunning').checked = st.skipIfRunning !== false;
     $('#maaStatus').textContent = st.running
       ? `MAA 运行中（PID ${st.pid}）`
       : (st.configured ? 'MAA 未运行' : '尚未配置 MAA 路径');
+    // 可选的 MAA 任务名标签
+    const chips = $('#maaTaskChips');
+    chips.innerHTML = '';
+    const list = Array.isArray(st.tasks) ? st.tasks : [];
+    if (!list.length) {
+      chips.innerHTML = '<span class="hint">还没有任务名，添加后可在任务里选择</span>';
+    } else {
+      list.forEach((name) => {
+        const el = document.createElement('div');
+        el.className = 'fest-chip on';
+        el.textContent = name + ' ✕';
+        el.title = '点击删除这个任务名';
+        el.addEventListener('click', async () => {
+          await window.api.maaSetPrefs({ tasks: list.filter((x) => x !== name) });
+          await updateMaaUI();
+        });
+        chips.appendChild(el);
+      });
+    }
   } catch (e) {
     $('#maaStatus').textContent = 'MAA 状态读取失败';
   }
 }
+
+$('#btnMaaAddTask').addEventListener('click', async () => {
+  const name = $('#maaNewTask').value.trim();
+  if (!name) return;
+  const st = await window.api.maaStatus();
+  const list = Array.isArray(st.tasks) ? st.tasks : [];
+  if (list.includes(name)) { alert('这个任务名已存在'); return; }
+  await window.api.maaSetPrefs({ tasks: [...list, name] });
+  $('#maaNewTask').value = '';
+  await updateMaaUI();
+});
+
+$('#maaAutoStopMin').addEventListener('change', async () => {
+  const v = Math.max(0, Math.min(1440, Math.round(Number($('#maaAutoStopMin').value) || 0)));
+  $('#maaAutoStopMin').value = String(v);
+  await window.api.maaSetPrefs({ autoStopMin: v });
+});
+
+$('#maaSkipRunning').addEventListener('change', async (e) => {
+  await window.api.maaSetPrefs({ skipIfRunning: e.target.checked });
+});
+
+// 任务卡片上点「▶」立即启动 MAA
+async function runMaaForTask(t) {
+  const r = await window.api.maaRunTask(t.id);
+  const msg = (!r || !r.ok)
+    ? 'MAA 启动失败：' + ((r && r.error) || '未知错误')
+    : (r.skipped ? 'MAA 已在运行，已跳过重复启动' : `已启动 MAA（任务：${r.task}）`);
+  if (window.eve && window.eve.toast) window.eve.toast(msg, 4000);
+  else alert(msg);
+  await updateMaaUI();
+}
+
+// 到点自动联动结果提示
+window.api.onMaaEvent((p) => {
+  try {
+    const r = (p && p.result) || {};
+    const msg = r.ok
+      ? (r.skipped ? `「${p.title}」触发联动：MAA 已在运行，已跳过` : `「${p.title}」已自动启动 MAA（${r.task}）`)
+      : `「${p.title}」联动启动 MAA 失败：${r.error || '未知错误'}`;
+    if (window.eve && window.eve.toast) window.eve.toast(msg, 4500);
+    updateMaaUI();
+  } catch (e) {
+    console.error(e);
+  }
+});
 
 $('#sApiEnabled').addEventListener('change', async (e) => {
   await window.api.apiSetPrefs({ enabled: e.target.checked });
@@ -1419,6 +1523,140 @@ $('#btnMaaStop').addEventListener('click', async () => {
   const r = await window.api.maaStop();
   await updateMaaUI();
   if (!r || !r.ok) alert('停止 MAA 失败：' + ((r && r.error) || '未知错误'));
+});
+
+// ---------- MAA 任务面板（与「一键长草」一致的配置界面） ----------
+let maaPanelData = null;
+
+$('#btnMaaPanel').addEventListener('click', () => openMaaPanel());
+
+async function openMaaPanel() {
+  $('#maaPanel').hidden = false;
+  await loadMaaPanel();
+}
+
+async function loadMaaPanel() {
+  $('#maaPanelMsg').textContent = '';
+  $('#maaTaskList').innerHTML = '<div class="hint">读取中…</div>';
+  const r = await window.api.maaConfigLoad();
+  if (!r || !r.ok) {
+    maaPanelData = null;
+    $('#maaPanelStatus').textContent = '无法读取 MAA 配置';
+    $('#maaTaskList').innerHTML = `<div class="hint">${esc((r && r.error) || '未知错误')}<br>可在「⚙ 设置 → 外部联动」里选择 MAA.exe 路径。</div>`;
+    return;
+  }
+  maaPanelData = r;
+  $('#maaPanelStatus').textContent = `已载入 ${r.tasks.length} 个任务 · ${r.startDirectly ? '启动后直接运行' : '启动后需手动开始'}`;
+  const sel = $('#maaCfgSelect');
+  sel.innerHTML = '';
+  (r.configs || []).forEach((n) => {
+    const o = document.createElement('option');
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  });
+  sel.value = r.current;
+  renderMaaTaskList(r.tasks);
+}
+
+function maaFieldHtml(t, f) {
+  const key = esc(f.key);
+  if (f.type === 'bool') {
+    return `<label class="maa-f maa-f-bool"><input type="checkbox" data-key="${key}" data-type="bool" ${f.value ? 'checked' : ''} /> ${esc(f.label)}</label>`;
+  }
+  if (f.type === 'select') {
+    const opts = (f.options || []).map(([v, l]) => `<option value="${esc(v)}" ${String(f.value) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    return `<label class="maa-f"><span>${esc(f.label)}</span><select data-key="${key}" data-type="select">${opts}</select></label>`;
+  }
+  if (f.type === 'int') {
+    return `<label class="maa-f"><span>${esc(f.label)}</span><input type="number" data-key="${key}" data-type="int" value="${esc(f.value)}" min="${f.min == null ? 0 : f.min}" /></label>`;
+  }
+  if (f.type === 'list' || f.type === 'textlist') {
+    return `<label class="maa-f maa-f-wide"><span>${esc(f.label)}</span><textarea rows="2" data-key="${key}" data-type="${esc(f.type)}">${esc(f.value)}</textarea></label>`;
+  }
+  return `<label class="maa-f"><span>${esc(f.label)}</span><input type="text" data-key="${key}" data-type="text" value="${esc(f.value)}" /></label>`;
+}
+
+function renderMaaTaskList(tasks) {
+  const box = $('#maaTaskList');
+  box.innerHTML = '';
+  (tasks || []).forEach((t) => {
+    const card = document.createElement('div');
+    card.className = 'maa-task' + (t.enabled ? ' on' : '');
+    card.dataset.index = String(t.index);
+    const fieldsHtml = (t.fields || []).map((f) => maaFieldHtml(t, f)).join('');
+    card.innerHTML = `
+      <div class="maa-task-head">
+        <label class="inline-check" style="margin:0">
+          <input type="checkbox" class="maa-enable" ${t.enabled ? 'checked' : ''} />
+          <strong>${esc(t.label)}</strong>
+          <span class="maa-type">${esc(t.taskType)}</span>
+        </label>
+        <input type="text" class="maa-name" placeholder="任务备注名（可选）" value="${esc(t.name)}" />
+      </div>
+      ${fieldsHtml ? `<div class="maa-fields">${fieldsHtml}</div>` : ''}`;
+    const cb = card.querySelector('.maa-enable');
+    cb.addEventListener('change', () => card.classList.toggle('on', cb.checked));
+    box.appendChild(card);
+  });
+}
+
+// 收集面板里所有改动
+function collectMaaUpdates() {
+  const updates = [];
+  document.querySelectorAll('#maaTaskList .maa-task').forEach((card) => {
+    const patch = {
+      enabled: card.querySelector('.maa-enable').checked,
+      name: card.querySelector('.maa-name').value,
+      fields: {},
+    };
+    card.querySelectorAll('[data-key]').forEach((el) => {
+      patch.fields[el.dataset.key] = el.dataset.type === 'bool' ? el.checked : el.value;
+    });
+    updates.push({ index: Number(card.dataset.index), patch });
+  });
+  return updates;
+}
+
+$('#btnMaaPanelSave').addEventListener('click', async () => {
+  const msg = $('#maaPanelMsg');
+  if (!maaPanelData) { msg.textContent = '没有可保存的数据'; return; }
+  const btn = $('#btnMaaPanelSave');
+  btn.disabled = true;
+  msg.textContent = '保存中…';
+  try {
+    const r = await window.api.maaConfigUpdateTasks(collectMaaUpdates());
+    if (r && r.ok) {
+      msg.textContent = `已保存 ${r.changed} 个任务到 MAA 配置`;
+      if (r.tasks) renderMaaTaskList(r.tasks);
+    } else {
+      msg.textContent = '保存失败：' + ((r && r.error) || '未知错误');
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+$('#btnMaaPanelReload').addEventListener('click', () => loadMaaPanel());
+$('#btnMaaPanelDir').addEventListener('click', async () => {
+  const r = await window.api.maaConfigOpenDir();
+  if (!r || !r.ok) alert('打开配置目录失败：' + ((r && r.error) || '未知错误'));
+});
+$('#maaCfgSelect').addEventListener('change', async (e) => {
+  await window.api.maaConfigSetCurrent(e.target.value);
+  await loadMaaPanel();
+});
+$('#btnMaaPanelStart').addEventListener('click', async () => {
+  const st = await window.api.maaStatus();
+  const r = await window.api.maaStart((st && st.autoStartTask) || undefined);
+  $('#maaPanelMsg').textContent = (!r || !r.ok)
+    ? ('启动失败：' + ((r && r.error) || '未知错误'))
+    : (r.skipped ? 'MAA 已在运行' : `已启动 MAA（PID ${r.pid}）`);
+  await updateMaaUI();
+});
+$('#btnMaaPanelStop').addEventListener('click', async () => {
+  const r = await window.api.maaStop();
+  $('#maaPanelMsg').textContent = (!r || !r.ok) ? ('停止失败：' + ((r && r.error) || '未知错误')) : '已停止 MAA';
+  await updateMaaUI();
 });
 
 // ---------- 应用更新 ----------

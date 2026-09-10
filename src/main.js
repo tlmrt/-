@@ -23,7 +23,8 @@ const http = require('http');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { matchRoute, checkToken, extractToken, parseQuery } = require('./localapi');
-const { renderArgs, normalizeMaaPrefs } = require('./maa');
+const { renderArgs, normalizeMaaPrefs, normalizeTaskMaa } = require('./maa');
+const { buildEditableQueue, applyTaskPatch } = require('./maaconfig');
 
 const APP_ID = 'cn.evestudio.calendar';
 app.setAppUserModelId(APP_ID);
@@ -228,6 +229,9 @@ function fireNotification(task, alert) {
     atText: dayjs(alert.alertAt).format('YYYY-MM-DD HH:mm'),
   });
 
+  // 内置联动：任务配置了 MAA 时，自动启动 MAA
+  maybeStartMaaForTask(task);
+
   // 自定义提醒语音：播放自选音频 +（可选）系统 TTS 朗读任务标题
   if (useCustom || snd.speak) {
     playAlertVoice({
@@ -321,6 +325,8 @@ function saveTaskInternal(input) {
   const t = sanitizeTask(input);
   if (!t.id) t.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   if (!t.reminders || !t.reminders.length) t.reminders = [{ id: 'r_' + Math.random().toString(36).slice(2, 6), offsetMinutes: 0 }];
+  // 任务的 MAA 联动配置（到点是否自动启动 MAA、运行哪个任务、多久后自动停）
+  t.maa = normalizeTaskMaa(t.maa, maaPrefsLocal().autoStartTask);
   t._notifiedKeys = t._notifiedKeys || [];
   const idx = tasks.findIndex((x) => x.id === t.id);
   if (idx >= 0) {
@@ -504,9 +510,18 @@ const updateState = { lastResult: null, downloadedFile: null, progress: 0, check
 
 // 外部联动：本地 HTTP 接口 + MAA 控制
 const DEFAULT_API_PREFS = { enabled: true, port: 8765, token: '', webhook: '' };
-const DEFAULT_MAA_PREFS = { exePath: '', argsTemplate: '', workDir: '', autoStartTask: '默认' };
+const DEFAULT_MAA_PREFS = {
+  exePath: '',
+  argsTemplate: '',
+  workDir: '',
+  autoStartTask: '默认',
+  tasks: ['开始唤醒', '收取信用及购物', '自动公招', '基建换班'],
+  autoStopMin: 0,
+  skipIfRunning: true,
+};
 let apiServer = null;
 const maaState = { pid: null, startedAt: null };
+const maaStopTimer = { id: null };
 
 function updatePrefs() {
   const u = prefs.update && typeof prefs.update === 'object' ? prefs.update : {};
@@ -720,6 +735,7 @@ function maaStart(taskName) {
 
 function maaStop() {
   const pid = maaState.pid;
+  if (maaStopTimer.id) { clearTimeout(maaStopTimer.id); maaStopTimer.id = null; }
   if (!pid) return { ok: false, error: 'MAA 未由本应用启动（或已经停止）' };
   try {
     execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
@@ -728,6 +744,48 @@ function maaStop() {
     notifyWebhook('maa.stopped', { pid });
     return { ok: true, pid };
   } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+// 启动 MAA（带"已在运行则跳过"与"自动停止"能力）
+function maaStartWithOptions(taskName, opts) {
+  const o = opts || {};
+  const mp = maaPrefsLocal();
+  if (mp.skipIfRunning && !o.force) {
+    const st = maaStatus();
+    if (st.running) {
+      return { ok: true, skipped: true, reason: 'MAA 已在运行，跳过重复启动', pid: st.pid };
+    }
+  }
+  const r = maaStart(taskName);
+  if (!r.ok) return r;
+  const stopMin = Number(o.autoStopMin) > 0 ? Number(o.autoStopMin) : mp.autoStopMin;
+  if (stopMin > 0) {
+    if (maaStopTimer.id) clearTimeout(maaStopTimer.id);
+    maaStopTimer.id = setTimeout(() => {
+      maaStopTimer.id = null;
+      maaStop();
+      console.log('[maa] 已按设置自动停止');
+    }, stopMin * 60 * 1000);
+  }
+  return r;
+}
+
+// 任务到点：若该任务启用了 MAA 联动，则自动启动 MAA
+function maybeStartMaaForTask(task) {
+  try {
+    const m = normalizeTaskMaa(task && task.maa, maaPrefsLocal().autoStartTask);
+    if (!m.enabled) return null;
+    const r = maaStartWithOptions(m.task, { autoStopMin: m.autoStopMin });
+    console.log('[maa] 任务联动触发:', task.title, '→', JSON.stringify(r));
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('maa:event', { taskId: task.id, title: task.title, result: r });
+    }
+    if (!r.ok) notifyWebhook('maa.failed', { taskId: task.id, title: task.title, error: r.error });
+    return r;
+  } catch (e) {
+    console.error('[maa] 联动失败', e);
     return { ok: false, error: String(e && e.message ? e.message : e) };
   }
 }
@@ -753,6 +811,9 @@ function maaStatus() {
     exePath: mp.exePath,
     argsTemplate: mp.argsTemplate,
     autoStartTask: mp.autoStartTask,
+    tasks: mp.tasks,
+    autoStopMin: mp.autoStopMin,
+    skipIfRunning: mp.skipIfRunning,
   };
 }
 
@@ -866,12 +927,18 @@ async function handleApiRoute(route, { query, body }) {
       });
     }
 
-    case 'maa.start':
-      return maaStart(body && body.task);
-    case 'maa.stop':
-      return maaStop();
+    case 'maa.start': {
+      const r = maaStart(body && body.task);
+      if (!r.ok) return bad(r.error || '启动 MAA 失败');
+      return ok({ pid: r.pid, task: r.task, args: r.args });
+    }
+    case 'maa.stop': {
+      const r = maaStop();
+      if (!r.ok) return bad(r.error || '停止 MAA 失败');
+      return ok({ pid: r.pid });
+    }
     case 'maa.status':
-      return maaStatus();
+      return ok(maaStatus());
 
     case 'webhook.test': {
       const r = await notifyWebhook('test', { message: '这是来自开源日历的测试事件' });
@@ -912,7 +979,14 @@ function startApiServer() {
       }
       const body = await readBody(req);
       const result = await handleApiRoute(route, { query, body });
-      json(result.status || 200, result.body);
+      // 防御：路由返回值必须形如 { status, body }，万一某分支漏了包装也不至于 500
+      if (result && result.body !== undefined) {
+        json(result.status || 200, result.body);
+      } else if (result && result.ok === false) {
+        json(400, result);
+      } else {
+        json(200, { ok: true, data: result === undefined ? null : result });
+      }
     } catch (e) {
       json(500, { ok: false, error: String(e && e.message ? e.message : e) });
     }
@@ -968,15 +1042,122 @@ ipcMain.handle('api:openDocs', async () => {
 });
 
 ipcMain.handle('maa:status', () => maaStatus());
-ipcMain.handle('maa:start', (e, taskName) => maaStart(taskName));
+ipcMain.handle('maa:start', (e, taskName) => maaStartWithOptions(taskName, { force: true }));
 ipcMain.handle('maa:stop', () => maaStop());
+// 为某个日历任务手动启动 MAA（用该任务配置的 MAA 任务名）
+ipcMain.handle('maa:runTask', (e, taskId) => {
+  const t = tasks.find((x) => x.id === taskId);
+  if (!t) return { ok: false, error: '任务不存在' };
+  const m = normalizeTaskMaa(t.maa, maaPrefsLocal().autoStartTask);
+  return maybeStartMaaForTask({ ...t, maa: { ...m, enabled: true } });
+});
 ipcMain.handle('maa:setPrefs', (e, patch) => {
-  prefs.maa = { ...maaPrefsLocal(), ...(patch || {}) };
+  prefs.maa = normalizeMaaPrefs({ ...maaPrefsLocal(), ...(patch || {}) });
   savePrefs();
   return { ok: true, prefs: maaPrefsLocal() };
 });
-ipcMain.handle('maa:pickExe', async () => {
-  if (!win) return { ok: false };
+// ---- 读写 MAA 配置文件（把「一键长草」的任务列表搬进日历） ----
+function maaConfigPaths() {
+  const mp = maaPrefsLocal();
+  if (!mp.exePath) return null;
+  const dir = path.dirname(mp.exePath);
+  const cfgDir = path.join(dir, 'config');
+  const newFile = path.join(cfgDir, 'gui.new.json');
+  const oldFile = path.join(cfgDir, 'gui.json');
+  const file = fs.existsSync(newFile) ? newFile : (fs.existsSync(oldFile) ? oldFile : newFile);
+  return { dir, cfgDir, file, newFile };
+}
+
+function readMaaConfig() {
+  const ps = maaConfigPaths();
+  if (!ps) return { ok: false, error: '尚未配置 MAA 可执行文件路径（设置 → 外部联动）' };
+  if (!fs.existsSync(ps.file)) {
+    return { ok: false, error: '未找到 MAA 配置文件，请先运行一次 MAA（会生成 config/gui.new.json）', file: ps.file };
+  }
+  try {
+    const json = JSON.parse(fs.readFileSync(ps.file, 'utf-8').replace(/^\uFEFF/, ''));
+    return { ok: true, ps, json };
+  } catch (e) {
+    return { ok: false, error: '配置文件解析失败：' + (e && e.message ? e.message : e), file: ps.file };
+  }
+}
+
+function writeMaaConfig(ps, json) {
+  try {
+    const backup = ps.file + '.evecal.bak';
+    if (fs.existsSync(ps.file) && !fs.existsSync(backup)) fs.copyFileSync(ps.file, backup);
+    fs.writeFileSync(ps.file, JSON.stringify(json, null, 2), 'utf-8');
+    return { ok: true, file: ps.file };
+  } catch (e) {
+    return { ok: false, error: '写入失败：' + (e && e.message ? e.message : e) };
+  }
+}
+
+ipcMain.handle('maa:configLoad', () => {
+  const r = readMaaConfig();
+  if (!r.ok) return r;
+  const { json, ps } = r;
+  const configs = Object.keys(json.Configurations || {});
+  const current = json.Current && json.Configurations && json.Configurations[json.Current]
+    ? json.Current : (configs[0] || 'Default');
+  const cfg = (json.Configurations || {})[current] || {};
+  const start = (cfg.Gui && cfg.Gui.StartUpSettings) || {};
+  return {
+    ok: true,
+    file: ps.file,
+    current,
+    configs,
+    tasks: buildEditableQueue(cfg.TaskQueue),
+    startDirectly: !!start.RunDirectly,
+    startEmulator: !!start.StartEmulator,
+  };
+});
+
+ipcMain.handle('maa:configUpdateTasks', (e, { updates }) => {
+  const r = readMaaConfig();
+  if (!r.ok) return r;
+  const { json, ps } = r;
+  const configs = json.Configurations || {};
+  const current = json.Current && configs[json.Current] ? json.Current : Object.keys(configs)[0];
+  const cfg = configs[current];
+  if (!cfg || !Array.isArray(cfg.TaskQueue)) return { ok: false, error: '当前配置里没有任务队列' };
+  let changed = 0;
+  for (const u of (Array.isArray(updates) ? updates : [])) {
+    const idx = Number(u && u.index);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= cfg.TaskQueue.length) continue;
+    cfg.TaskQueue[idx] = applyTaskPatch(cfg.TaskQueue[idx], u.patch);
+    changed++;
+  }
+  const w = writeMaaConfig(ps, json);
+  if (!w.ok) return w;
+  console.log('[maa] 已更新 MAA 配置', changed, '项 →', ps.file);
+  return { ok: true, changed, file: ps.file, tasks: buildEditableQueue(cfg.TaskQueue) };
+});
+
+ipcMain.handle('maa:configSetCurrent', (e, name) => {
+  const r = readMaaConfig();
+  if (!r.ok) return r;
+  const { json, ps } = r;
+  if (!json.Configurations || !json.Configurations[name]) return { ok: false, error: '配置不存在：' + name };
+  json.Current = name;
+  const w = writeMaaConfig(ps, json);
+  if (!w.ok) return w;
+  return { ok: true, current: name };
+});
+
+ipcMain.handle('maa:configOpenDir', async () => {
+  const ps = maaConfigPaths();
+  if (!ps) return { ok: false, error: '尚未配置 MAA 路径' };
+  try {
+    fs.mkdirSync(ps.cfgDir, { recursive: true });
+    await shell.openPath(ps.cfgDir);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
+});
+
+ipcMain.handle('maa:pickExe', async () => {  if (!win) return { ok: false };
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: '选择 MAA 可执行文件（MAA.exe）',
     properties: ['openFile'],

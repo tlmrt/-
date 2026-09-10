@@ -48,6 +48,17 @@ contextBridge.exposeInMainWorld('api', {
   maaPickExe: () => ipcRenderer.invoke('maa:pickExe'),
   maaStart: (task) => ipcRenderer.invoke('maa:start', task),
   maaStop: () => ipcRenderer.invoke('maa:stop'),
+  maaRunTask: (taskId) => ipcRenderer.invoke('maa:runTask', taskId),
+  // MAA 任务配置（读写 MAA 的「一键长草」配置）
+  maaConfigLoad: () => ipcRenderer.invoke('maa:configLoad'),
+  maaConfigUpdateTasks: (updates) => ipcRenderer.invoke('maa:configUpdateTasks', { updates }),
+  maaConfigSetCurrent: (name) => ipcRenderer.invoke('maa:configSetCurrent', name),
+  maaConfigOpenDir: () => ipcRenderer.invoke('maa:configOpenDir'),
+  onMaaEvent: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('maa:event', handler);
+    return () => ipcRenderer.removeListener('maa:event', handler);
+  },
 
   // ---- 应用更新（直连 GitHub 仓库） ----
   updateStatus: () => ipcRenderer.invoke('update:status'),

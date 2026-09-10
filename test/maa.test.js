@@ -1,5 +1,5 @@
 // MAA 联动参数处理单测：node test/maa.test.js
-const { parseArgsString, renderArgs, normalizeMaaPrefs, isRunningFromPid } = require('../src/maa');
+const { parseArgsString, renderArgs, normalizeMaaPrefs, normalizeTaskMaa, isRunningFromPid } = require('../src/maa');
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -36,10 +36,25 @@ console.log('\n[3] 配置归一化');
   ok('默认任务名（空值回退）', n.autoStartTask === '默认');
   const d = normalizeMaaPrefs(null);
   ok('空输入给默认值', d.exePath === '' && d.argsTemplate === '' && d.workDir === '');
+  ok('任务列表去重去空', JSON.stringify(normalizeMaaPrefs({ tasks: ['A', ' A ', '', 'B', 'B'] }).tasks) === '["A","B"]');
+  ok('任务列表上限 40 个', normalizeMaaPrefs({ tasks: Array.from({ length: 60 }, (_, i) => 'T' + i) }).tasks.length === 40);
+  ok('自动停止默认 0（不自动停）', normalizeMaaPrefs({}).autoStopMin === 0);
+  ok('自动停止上限 1440 分钟', normalizeMaaPrefs({ autoStopMin: 99999 }).autoStopMin === 1440);
+  ok('自动停止负数归零', normalizeMaaPrefs({ autoStopMin: -5 }).autoStopMin === 0);
+  ok('默认跳过已在运行的 MAA', normalizeMaaPrefs({}).skipIfRunning === true);
+  ok('可关闭跳过行为', normalizeMaaPrefs({ skipIfRunning: false }).skipIfRunning === false);
 }
 
-console.log('\n[4] 运行状态判断');
+console.log('\n[3.5] 任务级 MAA 联动配置');
 {
+  const t = normalizeTaskMaa({ enabled: true, task: ' 开始唤醒 ', autoStopMin: 30 }, '默认');
+  ok('读取任务名并去除空格', t.task === '开始唤醒' && t.enabled === true && t.autoStopMin === 30);
+  ok('空任务名回退到默认任务', normalizeTaskMaa({ enabled: true }, '收取信用').task === '收取信用');
+  ok('缺省配置为关闭', normalizeTaskMaa(null).enabled === false && normalizeTaskMaa({}).enabled === false);
+  ok('自动停止按任务独立设置', normalizeTaskMaa({ enabled: true, autoStopMin: 0 }).autoStopMin === 0);
+}
+
+console.log('\n[4] 运行状态判断');{
   ok('无 pid → 未运行', isRunningFromPid(0, () => true) === false);
   ok('pid 存活 → 运行中', isRunningFromPid(1234, () => true) === true);
   ok('pid 不存在 → 未运行', isRunningFromPid(1234, () => { throw new Error('ESRCH'); }) === false);

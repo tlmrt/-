@@ -40,11 +40,30 @@ function renderArgs(template, vars) {
 
 function normalizeMaaPrefs(p) {
   const s = p && typeof p === 'object' ? p : {};
+  const tasks = Array.isArray(s.tasks)
+    ? [...new Set(s.tasks.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 40)
+    : [];
+  const autoStopMin = Number(s.autoStopMin);
   return {
     exePath: typeof s.exePath === 'string' ? s.exePath : '',
     argsTemplate: typeof s.argsTemplate === 'string' ? s.argsTemplate : '',
     workDir: typeof s.workDir === 'string' ? s.workDir : '',
     autoStartTask: typeof s.autoStartTask === 'string' && s.autoStartTask.trim() ? s.autoStartTask.trim() : '默认',
+    tasks, // 可在日历里选择的 MAA 任务名清单
+    autoStopMin: Number.isFinite(autoStopMin) && autoStopMin >= 0 ? Math.min(1440, Math.round(autoStopMin)) : 0,
+    skipIfRunning: s.skipIfRunning !== false, // 已在运行时不重复启动
+  };
+}
+
+// 归一化任务的 MAA 联动配置
+function normalizeTaskMaa(m, fallbackTask) {
+  const s = m && typeof m === 'object' ? m : {};
+  const task = typeof s.task === 'string' && s.task.trim() ? s.task.trim() : String(fallbackTask || '默认');
+  const stop = Number(s.autoStopMin);
+  return {
+    enabled: !!s.enabled,
+    task,
+    autoStopMin: Number.isFinite(stop) && stop >= 0 ? Math.min(1440, Math.round(stop)) : 0,
   };
 }
 
@@ -58,4 +77,4 @@ function isRunningFromPid(pid, aliveCheck) {
   }
 }
 
-module.exports = { parseArgsString, renderArgs, normalizeMaaPrefs, isRunningFromPid };
+module.exports = { parseArgsString, renderArgs, normalizeMaaPrefs, normalizeTaskMaa, isRunningFromPid };

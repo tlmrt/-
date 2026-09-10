@@ -23,6 +23,7 @@
         <button class="icon-btn" id="btnNext" title="下个月">›</button>
       </div>
       <div class="top-actions">
+        <button class="icon-btn" id="btnMaaPanel" title="MAA 任务（一键长草）">🎮</button>
         <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
       </div>
     </header>
@@ -107,6 +108,17 @@
           <label>提醒（可添加多条）</label>
           <div id="reminderList"></div>
           <button type="button" class="ghost-btn small" id="btnAddReminder">＋ 添加提醒</button>
+        </div>
+
+        <div class="field maa-field">
+          <label class="inline-check"><input type="checkbox" id="fMaaEnabled" /> 🎮 到点时自动启动 MAA</label>
+          <div id="maaTaskWrap" hidden>
+            <div class="theme-custom">
+              <select id="fMaaTask"></select>
+              <input type="number" id="fMaaAutoStop" min="0" max="1440" placeholder="自动停止(分钟)" />
+            </div>
+            <p class="hint">任务到点提醒时会自动拉起 MAA（已在运行则跳过）；自动停止填 0 表示不自动停止，留空则用设置里的默认值。</p>
+          </div>
         </div>
 
         <div class="modal-foot">
@@ -225,6 +237,18 @@
               <input type="text" id="maaTask" placeholder="默认任务名" style="max-width:120px" />
               <button type="button" class="ghost-btn small" id="btnMaaSave">保存</button>
             </div>
+            <div class="opacity-row">
+              <span class="opacity-label">默认自动停止</span>
+              <input type="number" id="maaAutoStopMin" min="0" max="1440" style="width:74px" />
+              <span class="opacity-label">分钟（0=不停）</span>
+              <label class="inline-check" style="margin:0"><input type="checkbox" id="maaSkipRunning" /> 已在运行则跳过</label>
+            </div>
+            <div class="field-inner-block" style="margin-top:6px">
+              <input type="text" id="maaNewTask" placeholder="添加可选的 MAA 任务名，如 开始唤醒" />
+              <button type="button" class="ghost-btn small" id="btnMaaAddTask">添加</button>
+            </div>
+            <div class="fest-countries" id="maaTaskChips"></div>
+            <p class="hint" style="margin-top:2px">上面这些任务名会出现在「编辑任务 → 到点时自动启动 MAA」的下拉里；点标签可删除。</p>
             <div class="theme-custom" style="margin-top:6px">
               <button type="button" class="primary-btn small" id="btnMaaStart">启动 MAA</button>
               <button type="button" class="ghost-btn small" id="btnMaaStop">停止 MAA</button>
@@ -392,6 +416,34 @@
       </div>
       <div class="modal-foot">
         <button type="button" class="primary-btn" data-close="festModal">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAA 任务面板（与「一键长草」一致的配置界面） -->
+  <div class="modal-mask" id="maaPanel" hidden>
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <h3>🎮 MAA 任务（一键长草配置）</h3>
+        <button class="icon-btn" data-close="maaPanel">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="maa-panel-bar">
+          <span class="opacity-label">配置</span>
+          <select id="maaCfgSelect"></select>
+          <span class="holi-status" id="maaPanelStatus" style="margin:0">读取中…</span>
+          <button type="button" class="primary-btn small" id="btnMaaPanelStart">启动 MAA</button>
+          <button type="button" class="ghost-btn small" id="btnMaaPanelStop">停止</button>
+          <button type="button" class="ghost-btn small" id="btnMaaPanelReload">重新载入</button>
+          <button type="button" class="ghost-btn small" id="btnMaaPanelDir">配置目录</button>
+        </div>
+        <p class="hint">下面就是 MAA 配置文件里的任务队列（等同 MAA 的「一键长草」）：勾选要执行的任务、按需改参数，改完点右下角「保存到 MAA 配置」。保存后 MAA 启动即按这份配置运行（MAA 里开启"运行前直接开始"时会自动开跑）。</p>
+        <div id="maaTaskList" class="maa-task-list"></div>
+      </div>
+      <div class="modal-foot">
+        <span class="hint" id="maaPanelMsg" style="margin-right:auto"></span>
+        <button type="button" class="ghost-btn" data-close="maaPanel">关闭</button>
+        <button type="button" class="primary-btn" id="btnMaaPanelSave">保存到 MAA 配置</button>
       </div>
     </div>
   </div>
