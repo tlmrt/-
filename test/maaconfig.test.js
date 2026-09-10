@@ -144,6 +144,16 @@ console.log('\n[8] 关卡分组排序（常用 / 活动 置顶，与 MAA 一致�
   ok('资源本再次之', s[4].group === 'resource');
   ok('主线最后', s[5].group === 'main');
 
+  // 当期活动（current）优先于常用本
+  const withCurrent = [
+    { code: 'CE-6', stageId: 'wk_melee_6', group: 'common' },
+    { code: 'BI-1', stageId: 'act14side_01_perm', group: 'current', eventOrder: 14 },
+    { code: 'BI-2', stageId: 'act14side_02_perm', group: 'current', eventOrder: 14 },
+  ];
+  const s0 = searchLevels('', withCurrent);
+  ok('当期活动排在常用本之前', s0[0].group === 'current' && s0[0].code === 'BI-1', s0.map((l) => l.code).join(','));
+  ok('当期活动内部按代号排序', s0[1].code === 'BI-2');
+
   // 同等匹配强度时，常用组优先
   const s2 = searchLevels('-', levels);
   ok('模糊搜索同样按分组排序', s2[0].group === 'common', JSON.stringify(s2.map((l) => l.code)));

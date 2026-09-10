@@ -1053,6 +1053,7 @@ body.dragging-widget .day-cell { cursor: grabbing; }
   white-space: nowrap;
 }
 .ml-group.g-common { background: #ffe9e9; color: #d94a4a; }
+.ml-group.g-current { background: #e6f7ee; color: #12855a; }
 .ml-group.g-event { background: #fff3e0; color: #c47a00; }
 .ml-group.g-resource { background: #e8f3ff; color: #2563eb; }
 .ml-group.g-main { background: #eef0f6; color: #5b6478; }

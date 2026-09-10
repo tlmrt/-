@@ -1250,11 +1250,12 @@ let maaLevelsCache = null;
 
 // 最常用的资源本 / 刷材料关（与 MAA 一样置顶）
 const COMMON_STAGE_CODES = new Set([
-  '1-7', 'CE-6', 'LS-5', 'AP-5', 'SK-5',
+  '1-7', 'CE-6', 'LS-6', 'AP-5', 'SK-5',
   'PR-A-1', 'PR-A-2', 'PR-B-1', 'PR-B-2', 'PR-C-1', 'PR-C-2', 'PR-D-1', 'PR-D-2',
 ]);
-const GROUP_RANK = { common: 0, event: 1, resource: 2, main: 3, other: 4 };
-const GROUP_LABEL = { common: '常用', event: '活动', resource: '资源本', main: '主线', other: '其他' };
+// 分组优先级：当期活动 → 常用资源本 → 其它活动 → 资源本 → 主线 → 其他
+const GROUP_RANK = { current: 0, common: 1, event: 2, resource: 3, main: 4, other: 5 };
+const GROUP_LABEL = { current: '当期活动', common: '常用', event: '活动', resource: '资源本', main: '主线', other: '其他' };
 
 function classifyStage(code, stageId) {
   const sid = String(stageId || '');
@@ -1279,7 +1280,22 @@ function naturalCompare(a, b) {
   return String(a).localeCompare(String(b), 'zh-CN', { numeric: true, sensitivity: 'base' });
 }
 
-function loadMaaLevels(force) {
+// MAA 资源文件指纹：用于"检测到 MAA 更新后自动同步关卡数据"
+function maaResourceFingerprint(dir) {
+  const parts = [];
+  for (const f of ['resource/stages.json', 'resource/item_index.json']) {
+    try {
+      const st = fs.statSync(path.join(dir, f));
+      parts.push(`${f}:${st.size}:${Math.round(st.mtimeMs)}`);
+    } catch (e) {
+      parts.push(`${f}:missing`);
+    }
+  }
+  return parts.join('|');
+}
+
+function loadMaaLevels(opts) {
+  const force = !!(opts && opts.force);
   const mp = maaPrefsLocal();
   if (!mp.exePath) return { ok: false, error: '尚未配置 MAA 可执行文件路径' };
   const dir = path.dirname(mp.exePath);
@@ -1287,7 +1303,11 @@ function loadMaaLevels(force) {
   if (!fs.existsSync(stagesFile)) {
     return { ok: false, error: '未找到 MAA 关卡数据：' + stagesFile };
   }
-  if (maaLevelsCache && !force && maaLevelsCache.dir === dir) return { ok: true, ...maaLevelsCache };
+  const fingerprint = maaResourceFingerprint(dir);
+  // 命中缓存：同一目录 + 资源文件未变（MAA 更新过则指纹变化，自动重新载入）
+  if (!force && maaLevelsCache && maaLevelsCache.dir === dir && maaLevelsCache.fingerprint === fingerprint) {
+    return { ok: true, ...maaLevelsCache, refreshed: false };
+  }
   try {
     const stages = JSON.parse(fs.readFileSync(stagesFile, 'utf-8').replace(/^\uFEFF/, ''));
     let itemMap = {};
@@ -1315,7 +1335,19 @@ function loadMaaLevels(force) {
         eventOrder: eventOrderOf(stageId),
       };
     }).filter((l) => l.code);
-    // 排序：常用资源本 → 活动本（最新活动优先）→ 其它资源本 → 主线 → 其他；同组按代号自然序
+
+    // 当期活动 = 活动编号最大的那期（最新一期），置顶显示
+    const maxEvent = levels.reduce((mx, l) => (l.group === 'event' ? Math.max(mx, l.eventOrder || 0) : mx), 0);
+    if (maxEvent > 0) {
+      for (const l of levels) {
+        if (l.group === 'event' && (l.eventOrder || 0) === maxEvent) {
+          l.group = 'current';
+          l.groupLabel = GROUP_LABEL.current;
+        }
+      }
+    }
+
+    // 排序：当期活动 → 常用资源本 → 其它活动（最新优先）→ 资源本 → 主线 → 其他
     levels.sort((a, b) => {
       const byGroup = GROUP_RANK[a.group] - GROUP_RANK[b.group];
       if (byGroup) return byGroup;
@@ -1325,17 +1357,23 @@ function loadMaaLevels(force) {
       }
       return naturalCompare(a.code, b.code);
     });
-    maaLevelsCache = { dir, at: Date.now(), levels };
-    console.log('[maa] 已载入关卡清单', levels.length, '个（常用', levels.filter((l) => l.group === 'common').length, '/ 活动', levels.filter((l) => l.group === 'event').length, '）');
-    return { ok: true, ...maaLevelsCache };
+
+    const prevFp = maaLevelsCache && maaLevelsCache.fingerprint;
+    maaLevelsCache = { dir, at: Date.now(), levels, fingerprint };
+    const refreshed = !!(prevFp && prevFp !== fingerprint);
+    console.log('[maa] 已载入关卡清单', levels.length, '个（当期活动', levels.filter((l) => l.group === 'current').length,
+      '/ 常用', levels.filter((l) => l.group === 'common').length, '/ 活动', levels.filter((l) => l.group === 'event').length, '）', refreshed ? '· MAA 已更新，数据已同步' : '');
+    return { ok: true, ...maaLevelsCache, refreshed };
   } catch (e) {
     return { ok: false, error: '关卡数据解析失败：' + (e && e.message ? e.message : e) };
   }
 }
 
-ipcMain.handle('maa:levels', (e, force) => {
-  const r = loadMaaLevels(!!force);
-  return r.ok ? { ok: true, count: r.levels.length, levels: r.levels } : r;
+ipcMain.handle('maa:levels', (e, opts) => {
+  const r = loadMaaLevels(opts);
+  return r.ok
+    ? { ok: true, count: r.levels.length, levels: r.levels, refreshed: !!r.refreshed, at: r.at }
+    : r;
 });
 
 ipcMain.handle('maa:pickExe', async () => {  if (!win) return { ok: false };

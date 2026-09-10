@@ -1521,13 +1521,17 @@ let maaPanelDate = null;
 let maaLevels = [];        // MAA 关卡清单（来自 MAA 的 resource/stages.json）
 let maaLevelsError = '';
 
-async function ensureMaaLevels(force) {
-  if (maaLevels.length && !force) return true;
+async function ensureMaaLevels(force, alwaysCheck) {
+  if (maaLevels.length && !force && !alwaysCheck) return true;
   try {
     const r = await window.api.maaLevels(!!force);
     if (r && r.ok) {
       maaLevels = r.levels || [];
       maaLevelsError = '';
+      // 主进程检测到 MAA 资源变化（MAA 更新过）时提示一次
+      if (r.refreshed && window.eve && window.eve.toast) {
+        window.eve.toast(`已同步 MAA 最新关卡数据（${r.count} 个关卡）`);
+      }
       return true;
     }
     maaLevels = [];
@@ -1558,7 +1562,7 @@ function normalizeStageCodeLocal(input) {
 
 function searchLevelsLocal(keyword) {
   const raw = String(keyword == null ? '' : keyword).trim();
-  const rank = { common: 0, event: 1, resource: 2, main: 3, other: 4 };
+  const rank = { current: 0, common: 1, event: 2, resource: 3, main: 4, other: 5 };
   const rankOf = (l) => (rank[l.group] !== undefined ? rank[l.group] : 5);
   const byGroup = (a, b) => {
     const g = rankOf(a) - rankOf(b);
@@ -1631,7 +1635,8 @@ async function loadMaaPanel() {
     sel.appendChild(o);
   });
   sel.value = r.current;
-  await ensureMaaLevels(); // 关卡清单（失败不阻塞，只是关卡控件降级为文本提示）
+  // 每次打开面板都让主进程核对 MAA 资源指纹（MAA 更新过就自动同步关卡数据）
+  await ensureMaaLevels(false, true);
   renderMaaTaskList(r.tasks);
 }
 
@@ -1738,7 +1743,7 @@ function bindLevelsWidget(scope) {
         return;
       }
       sug.hidden = false;
-      const groupHint = '<div class="ml-hint">按「常用 → 活动 → 资源本 → 主线」排列</div>';
+      const groupHint = '<div class="ml-hint">按「当期活动 → 常用 → 活动 → 资源本 → 主线」排列</div>';
       sug.innerHTML = groupHint + hits.map((l) => `<div class="ml-item" data-code="${esc(l.code)}">
           <b>${esc(l.code)}</b>
           ${l.groupLabel ? `<span class="ml-group g-${esc(l.group || 'other')}">${esc(l.groupLabel)}</span>` : ''}
@@ -1836,6 +1841,24 @@ $('#btnMaaPanelSave').addEventListener('click', async () => {
   }
 });
 $('#btnMaaPanelReload').addEventListener('click', () => loadMaaPanel());
+$('#btnMaaSyncLevels').addEventListener('click', async () => {
+  const btn = $('#btnMaaSyncLevels');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '同步中…';
+  try {
+    const ok = await ensureMaaLevels(true);
+    if (ok) {
+      renderMaaTaskList((maaPanelData && maaPanelData.tasks) || []);
+      $('#maaPanelMsg').textContent = `已重新读取 MAA 关卡数据：${maaLevels.length} 个关卡`;
+    } else {
+      $('#maaPanelMsg').textContent = '同步失败：' + (maaLevelsError || '未知错误');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+});
 $('#btnMaaPanelDir').addEventListener('click', async () => {
   const r = await window.api.maaConfigOpenDir();
   if (!r || !r.ok) alert('打开配置目录失败：' + ((r && r.error) || '未知错误'));
