@@ -35,4 +35,29 @@ contextBridge.exposeInMainWorld('api', {
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:enable', { id, enabled }),
   openPluginDir: () => ipcRenderer.invoke('plugins:openDir'),
+  createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
+  openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),
+
+  // ---- 独立时间段（液体效果） ----
+  listSegments: () => ipcRenderer.invoke('segments:list'),
+  saveSegment: (seg) => ipcRenderer.invoke('segments:save', seg),
+  deleteSegment: (id) => ipcRenderer.invoke('segments:delete', id),
+
+  // ---- 桌面小组件 ----
+  createWidget: (payload) => ipcRenderer.invoke('widget:create', payload),
+  listWidgets: () => ipcRenderer.invoke('widget:list'),
+  widgetData: (wid) => ipcRenderer.invoke('widget:data', wid),
+  widgetClose: (wid) => ipcRenderer.invoke('widget:close', wid),
+  widgetToggleTop: (wid) => ipcRenderer.invoke('widget:toggleTop', wid),
+  widgetFocusMain: (wid) => ipcRenderer.invoke('widget:focusMain', wid),
+  onWidgetUpdate: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('widget:update', handler);
+    return () => ipcRenderer.removeListener('widget:update', handler);
+  },
+  onFocusDate: (cb) => {
+    const handler = (_e, dateStr) => cb(dateStr);
+    ipcRenderer.on('focus-date', handler);
+    return () => ipcRenderer.removeListener('focus-date', handler);
+  },
 });

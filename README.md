@@ -30,7 +30,27 @@
    └─ renderer.js      # 渲染层扩展脚本（可选）
 ```
 
-`plugin.json` 示例：
+### 写插件很简单（单文件即插件）
+
+把一个 `.js` 文件丢进插件目录就是一个插件，几行代码就能出效果：
+
+```js
+// @name 我的第一个插件
+// @version 1.0.0
+// @description 点按钮弹个提示
+
+eve.onReady(async () => {
+  eve.button({
+    label: '👋 打个招呼',
+    onClick: async () => {
+      const tasks = (await eve.tasks()).filter(t => t.date === eve.today());
+      eve.toast(`今天有 ${tasks.length} 个任务`);
+    },
+  });
+});
+```
+
+想带多文件/资源时，也可以用**文件夹插件**（`plugins/my-plugin/plugin.json` + `renderer.js`）：
 
 ```json
 {
@@ -42,33 +62,25 @@
 }
 ```
 
-### 渲染层插件能做什么
+📖 **完整教程**：[docs/PLUGIN_GUIDE.md](docs/PLUGIN_GUIDE.md)（从零到发布、API 全表、Cookbook、调试技巧）。
+应用内也能看：**⚙ 设置 → 插件 → 「插件开发教程」**（会复制一份到插件目录并用系统默认程序打开），还有一键「创建示例插件」。
 
-`renderer.js` 被注入到日历页面执行（与页面同上下文），因此可以：
+### 插件能用的三套 API
 
-1. **读写数据 / 调用系统能力**：通过 `window.api`（即 preload 暴露的 IPC）：
-   - `listTasks()` `saveTask(task)` `deleteTask(id)`
-   - `getPrefs()` `setPrefs(patch)`
-   - `pickImage()` `setBgImage(name)` `getDayImages()` `setDayImage(date, name)` 等
-2. **订阅事件总线 `window.eveBus`**：
-
-   | 事件 | 载荷 | 时机 |
-   |---|---|---|
-   | `eve:ready` | — | 应用初始化完成、插件可放心用 API |
-   | `eve:task-saved` | task 对象 | 任务创建/更新后 |
-   | `eve:task-deleted` | task id | 任务删除后 |
-   | `eve:date-selected` | 'YYYY-MM-DD' | 用户切换选中日期后 |
-3. **直接操作 DOM / 注入 CSS**：为页面加按钮、面板、横幅、样式。
+1. **`window.eve`（推荐）**：便捷 API —— `eve.button()` `eve.panel()` `eve.toast()` `eve.tasks()` `eve.saveTask()` `eve.onTaskSaved()` `eve.today()` …
+2. **`window.eveBus`**：事件总线 —— `eve:ready` / `eve:task-saved` / `eve:task-deleted` / `eve:date-selected` / `eve:segment-saved` / `eve:widget-created`
+3. **`window.api`**：底层 IPC —— 任务、时间段、偏好、图片、背景媒体、桌面小组件等全部能力
 
 ### 启用 / 停用与加载顺序
 
 - 插件默认启用；在 **⚙ 设置 → 插件** 里可停用/启用（下次启动生效）
-- 勾选启动顺序：页面初始化 → `window.api` 就绪 → 逐个注入 `renderer.js` → 广播 `eve:ready`
-- 默认**不内置任何插件**。想体验/参考写法：把 `extras/demo-plugin/` 整个文件夹复制到插件目录 `plugins/demo-greeting/`，重启应用即可（应用启动时会扫描插件目录）
+- 加载顺序：页面初始化 → `window.api` 就绪 → 逐个注入插件脚本 → 广播 `eve:ready`
+- 默认**不内置任何插件**；「创建示例插件」可在插件目录生成 `demo-hello.js` 供参考
+- 调试：窗口内 **Ctrl + Shift + I** 打开开发者工具、**Ctrl + R** 重载页面（改插件不必重启应用）
 
 ### 安全边界（重要）
 
-渲染层插件与日历页面共享权限：可以读本地任务数据、调用所有 IPC。**请只安装可信来源的插件**，或在代码审查后再使用。想更彻底隔离、增加主进程级插件能力（提醒钩子、网络等），欢迎在仓库提 Issue/PR 讨论设计。
+插件与日历页面共享权限：可以读本地任务数据、调用所有 IPC。**请只安装可信来源的插件**，或在代码审查后再使用。想更彻底隔离、增加主进程级插件能力（提醒钩子、网络等），欢迎在仓库提 Issue/PR 讨论设计。
 
 ## 🛠 架构
 

@@ -29,6 +29,9 @@ let isQuitting = false;
 let tasks = []; // 全部任务
 let prefs = { weekStart: 1, notifySound: true };
 let dayImgMap = {}; // { 'YYYY-MM-DD': fileName } 单日贴纸图
+let segments = [];  // 独立时间段 [{id,date,start,end,title,color}]，进行中时该日格子显示液体
+let widgetRecs = []; // 桌面小组件 [{id,date,x,y,alwaysOnTop}]
+const widgetWins = new Map(); // 小组件 id -> BrowserWindow
 
 const DATA_DIR = () => app.getPath('userData');
 const TASKS_FILE = () => path.join(DATA_DIR(), 'tasks.json');
@@ -36,6 +39,8 @@ const PREFS_FILE = () => path.join(DATA_DIR(), 'prefs.json');
 const DAYIMG_FILE = () => path.join(DATA_DIR(), 'dayimages.json');
 const IMG_DIR = () => path.join(DATA_DIR(), 'images');
 const PLUGIN_DIR = () => path.join(DATA_DIR(), 'plugins');
+const SEG_FILE = () => path.join(DATA_DIR(), 'segments.json');
+const WIDGET_FILE = () => path.join(DATA_DIR(), 'widgets.json');
 
 // ---------------- 数据持久化 ----------------
 function loadJSON(file, fallback) {
@@ -66,6 +71,61 @@ function savePrefs() {
     fs.writeFileSync(PREFS_FILE(), JSON.stringify(prefs, null, 2), 'utf-8');
   } catch (e) {
     console.error('保存偏好失败', e);
+  }
+}
+
+// ---------------- 独立时间段 / 桌面小组件：持久化 ----------------
+function saveSegments() {
+  try {
+    fs.mkdirSync(DATA_DIR(), { recursive: true });
+    fs.writeFileSync(SEG_FILE(), JSON.stringify({ segments }, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('保存时间段失败', e);
+  }
+}
+
+function saveWidgets() {
+  try {
+    fs.mkdirSync(DATA_DIR(), { recursive: true });
+    fs.writeFileSync(WIDGET_FILE(), JSON.stringify({ widgets: widgetRecs }, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('保存小组件失败', e);
+  }
+}
+
+// 某任务在某天是否发生（与渲染层 taskOccursOn 保持一致，供小组件取数）
+function taskOccursOnDate(task, dateStr) {
+  const rule = task.repeat || 'none';
+  if (rule === 'none') return task.date === dateStr;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  if (rule === 'daily') return true;
+  if (rule === 'weekdays') { const w = date.getDay(); return w >= 1 && w <= 5; }
+  if (rule === 'weekly') {
+    const [sy, sm, sd] = task.date.split('-').map(Number);
+    return date.getDay() === new Date(sy, sm - 1, sd).getDay();
+  }
+  if (rule === 'monthly') {
+    const day = Number(task.date.split('-')[2]);
+    const dim = new Date(y, m, 0).getDate();
+    return d === Math.min(day, dim) || d === day;
+  }
+  return false;
+}
+
+// 某天的小组件数据（日期 / 任务 / 时间段）
+function widgetDataFor(dateStr) {
+  const list = tasks
+    .filter((t) => taskOccursOnDate(t, dateStr))
+    .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+    .map((t) => ({ id: t.id, title: t.title, time: t.time, priority: t.priority, note: t.note }));
+  const segs = segments.filter((s) => s.date === dateStr);
+  return { date: dateStr, tasks: list, segments: segs };
+}
+
+function broadcastToWidgets(channel, payload) {
+  for (const w of widgetWins.values()) {
+    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 }
 
@@ -210,12 +270,88 @@ ipcMain.handle('tasks:save', (e, input) => {
     tasks.push(t);
   }
   saveTasks();
+  broadcastToWidgets('widget:update');
   return { ok: true, task: { ...t } };
 });
 
 ipcMain.handle('tasks:delete', (e, id) => {
   tasks = tasks.filter((x) => x.id !== id);
   saveTasks();
+  broadcastToWidgets('widget:update');
+  return { ok: true };
+});
+
+// ---------------- 独立时间段 ----------------
+ipcMain.handle('segments:list', () => segments.map((s) => ({ ...s })));
+
+ipcMain.handle('segments:save', (e, seg) => {
+  if (!seg || !seg.date || !seg.start || !seg.end) return { ok: false };
+  const item = {
+    id: seg.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
+    date: String(seg.date),
+    start: String(seg.start),
+    end: String(seg.end),
+    title: String(seg.title || ''),
+    color: String(seg.color || '#4f6bff'),
+  };
+  const idx = segments.findIndex((s) => s.id === item.id);
+  if (idx >= 0) segments[idx] = item; else segments.push(item);
+  saveSegments();
+  broadcastToWidgets('widget:update');
+  return { ok: true, segment: { ...item } };
+});
+
+ipcMain.handle('segments:delete', (e, id) => {
+  segments = segments.filter((s) => s.id !== id);
+  saveSegments();
+  broadcastToWidgets('widget:update');
+  return { ok: true };
+});
+
+// ---------------- 桌面小组件 ----------------
+ipcMain.handle('widget:list', () => widgetRecs.map((r) => ({ ...r })));
+
+ipcMain.handle('widget:create', (e, { date, x, y }) => {
+  if (!date) return { ok: false };
+  const rec = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    date: String(date),
+    x: Number.isFinite(x) ? Math.round(x) : undefined,
+    y: Number.isFinite(y) ? Math.round(y) : undefined,
+    alwaysOnTop: false,
+  };
+  widgetRecs.push(rec);
+  saveWidgets();
+  spawnWidgetWin(rec);
+  return { ok: true, id: rec.id };
+});
+
+ipcMain.handle('widget:data', (e, wid) => {
+  const rec = widgetRecs.find((r) => r.id === wid);
+  if (!rec) return null;
+  return { ...widgetDataFor(rec.date), alwaysOnTop: !!rec.alwaysOnTop };
+});
+
+ipcMain.handle('widget:close', (e, wid) => {
+  closeWidgetById(wid);
+  return { ok: true };
+});
+
+ipcMain.handle('widget:toggleTop', (e, wid) => {
+  const rec = widgetRecs.find((r) => r.id === wid);
+  if (!rec) return { ok: false };
+  rec.alwaysOnTop = !rec.alwaysOnTop;
+  saveWidgets();
+  const w = widgetWins.get(wid);
+  if (w && !w.isDestroyed()) w.setAlwaysOnTop(rec.alwaysOnTop);
+  return { ok: true, alwaysOnTop: rec.alwaysOnTop };
+});
+
+ipcMain.handle('widget:focusMain', (e, wid) => {
+  const rec = widgetRecs.find((r) => r.id === wid);
+  if (!rec) return { ok: false };
+  ensureWindow();
+  if (win) win.webContents.send('focus-date', rec.date);
   return { ok: true };
 });
 
@@ -353,17 +489,59 @@ ipcMain.handle('bgvideo:set', (e, fileName) => {
 });
 
 // ---------------- 插件（开源扩展口） ----------------
-// 插件目录：userData/plugins/<id>/，含 plugin.json（元数据）+ 可选 renderer.js（渲染层脚本）
-// 渲染层脚本在页面加载后注入执行，可使用 window.api（IPC）与 window.eveBus（事件总线）
+// 支持两种写法（都很简单）：
+//   ① 单文件插件：plugins/my-plugin.js —— 文件顶部用注释写元数据即可：
+//        // @name 我的插件
+//        // @version 1.0.0
+//        // @description 一句话说明
+//   ② 文件夹插件：plugins/my-plugin/plugin.json + renderer.js（适合多文件/带资源的插件）
+// 插件脚本在页面加载后注入执行，可使用 window.api（IPC）、window.eveBus（事件总线）、window.eve（便捷 API）
+
+// 解析单文件插件的头部注释元数据（// @key value 或 /* @key value *\/）
+function parsePluginHeader(text) {
+  const meta = {};
+  const head = String(text || '').slice(0, 1500);
+  const re = /@(name|version|description|author|renderer)\s+(.+)/g;
+  let m;
+  while ((m = re.exec(head))) meta[m[1]] = m[2].trim();
+  return meta;
+}
+
+function pluginEnabled(id) {
+  return !(prefs.plugins && prefs.plugins[id] === false); // 默认启用
+}
 
 function scanPlugins() {
   const out = [];
   try {
     fs.mkdirSync(PLUGIN_DIR(), { recursive: true });
-    const dirs = fs.readdirSync(PLUGIN_DIR(), { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-    for (const id of dirs) {
+    const entries = fs.readdirSync(PLUGIN_DIR(), { withFileTypes: true });
+
+    // ① 单文件插件：plugins/*.js
+    for (const ent of entries) {
+      if (!ent.isFile() || !/\.js$/i.test(ent.name)) continue;
+      const abs = path.join(PLUGIN_DIR(), ent.name);
+      const id = ent.name.replace(/\.js$/i, '');
+      let meta = {};
+      try {
+        meta = parsePluginHeader(fs.readFileSync(abs, 'utf-8').replace(/^\uFEFF/, ''));
+      } catch (e) { /* 读取失败则用文件名兜底 */ }
+      out.push({
+        id: id,
+        name: meta.name || id,
+        version: meta.version || '0.1.0',
+        description: meta.description || '（单文件插件）',
+        author: meta.author || '',
+        enabled: pluginEnabled(id),
+        single: true,
+        rendererUrl: absToFileUrl(abs),
+      });
+    }
+
+    // ② 文件夹插件：plugins/<id>/plugin.json
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const id = ent.name;
       const base = path.join(PLUGIN_DIR(), id);
       const metaFile = path.join(base, 'plugin.json');
       if (!fs.existsSync(metaFile)) continue;
@@ -375,7 +553,7 @@ function scanPlugins() {
           version: meta.version || '0.0.0',
           description: meta.description || '',
           author: meta.author || '',
-          enabled: !(prefs.plugins && prefs.plugins[id] === false), // 默认启用
+          enabled: pluginEnabled(id),
         };
         if (meta.renderer) {
           const abs = path.join(base, meta.renderer);
@@ -392,9 +570,6 @@ function scanPlugins() {
   return out;
 }
 
-// 首次运行安装示例插件：已移除 —— 默认不装任何插件。
-// 想体验插件：把 extras/demo-plugin/ 整个文件夹复制到用户插件目录 plugins/demo-greeting/，重启应用即可。
-
 ipcMain.handle('plugins:list', () => scanPlugins());
 ipcMain.handle('plugins:enable', (e, { id, enabled }) => {
   if (!id) return { ok: false };
@@ -402,6 +577,36 @@ ipcMain.handle('plugins:enable', (e, { id, enabled }) => {
   prefs.plugins[id] = !!enabled;
   savePrefs();
   return { ok: true };
+});
+
+// 一键生成示例插件（单文件），方便照着改
+ipcMain.handle('plugins:createDemo', async () => {
+  try {
+    fs.mkdirSync(PLUGIN_DIR(), { recursive: true });
+    const src = path.join(__dirname, '..', 'extras', 'demo-hello.js');
+    const dst = path.join(PLUGIN_DIR(), 'demo-hello.js');
+    if (!fs.existsSync(src)) return { ok: false, error: '模板文件缺失' };
+    fs.copyFileSync(src, dst);
+    await shell.openPath(dst);
+    return { ok: true, file: dst };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
+});
+
+// 打开插件开发教程（复制一份到插件目录后用系统默认程序打开，方便阅读与修改）
+ipcMain.handle('plugins:openGuide', async () => {
+  try {
+    const src = path.join(__dirname, '..', 'docs', 'PLUGIN_GUIDE.md');
+    if (!fs.existsSync(src)) return { ok: false, error: '教程文件缺失' };
+    fs.mkdirSync(PLUGIN_DIR(), { recursive: true });
+    const dst = path.join(PLUGIN_DIR(), '插件开发教程.md');
+    fs.copyFileSync(src, dst);
+    await shell.openPath(dst);
+    return { ok: true, file: dst };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
 });
 ipcMain.handle('plugins:openDir', async () => {
   try {
@@ -434,6 +639,19 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
+
+  // 调试快捷键（菜单栏已移除，这里补上开发者工具与刷新，方便插件开发）
+  win.webContents.on('before-input-event', (ev, input) => {
+    if (input.type !== 'keyDown') return;
+    const key = String(input.key || '').toLowerCase();
+    if (input.control && input.shift && key === 'i') {
+      win.webContents.toggleDevTools();
+      ev.preventDefault();
+    } else if (input.control && key === 'r') {
+      win.webContents.reload();
+      ev.preventDefault();
+    }
+  });
 
   // 关闭窗口 → 隐藏到托盘（不退出）
   win.on('close', (e) => {
@@ -490,6 +708,73 @@ function ensureWindow() {
   win.focus();
 }
 
+// ---------------- 桌面小组件窗口 ----------------
+function spawnWidgetWin(rec) {
+  if (widgetWins.has(rec.id)) {
+    const old = widgetWins.get(rec.id);
+    if (old && !old.isDestroyed()) { old.show(); return old; }
+  }
+  const w = new BrowserWindow({
+    width: 232,
+    height: 196,
+    x: Number.isFinite(rec.x) ? rec.x : undefined,
+    y: Number.isFinite(rec.y) ? rec.y : undefined,
+    minWidth: 168,
+    minHeight: 120,
+    frame: false,
+    transparent: true,
+    skipTaskbar: true,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    alwaysOnTop: !!rec.alwaysOnTop,
+    backgroundColor: '#00000000',
+    title: '日历小组件',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  widgetWins.set(rec.id, w);
+  w.loadFile(path.join(__dirname, 'renderer', 'widget.html'), { query: { wid: rec.id } });
+
+  // 位置持久化（拖动后保存）
+  let moveTimer = null;
+  w.on('moved', () => {
+    if (moveTimer) clearTimeout(moveTimer);
+    moveTimer = setTimeout(() => {
+      try {
+        const b = w.getBounds();
+        const r = widgetRecs.find((x) => x.id === rec.id);
+        if (r) { r.x = b.x; r.y = b.y; saveWidgets(); }
+      } catch (e) { /* noop */ }
+    }, 400);
+  });
+
+  w.on('closed', () => {
+    widgetWins.delete(rec.id);
+  });
+  return w;
+}
+
+function restoreWidgets() {
+  for (const rec of widgetRecs) {
+    if (rec && rec.id && rec.date) spawnWidgetWin(rec);
+  }
+}
+
+// 小组件开关（关闭 = 移除并持久化） —— 供 IPC 使用
+function closeWidgetById(id) {
+  const w = widgetWins.get(id);
+  if (w && !w.isDestroyed()) w.close();
+  widgetWins.delete(id);
+  const before = widgetRecs.length;
+  widgetRecs = widgetRecs.filter((r) => r.id !== id);
+  if (widgetRecs.length !== before) saveWidgets();
+}
+
 // 开机自启：Windows 注册表启动项（Run），带 --hidden 参数实现后台静默
 function applyAutostart(enabled) {
   try {
@@ -535,11 +820,16 @@ app.whenReady().then(() => {
   if (!Array.isArray(tasks)) tasks = [];
   dayImgMap = loadJSON(DAYIMG_FILE(), {});
   if (!dayImgMap || typeof dayImgMap !== 'object' || Array.isArray(dayImgMap)) dayImgMap = {};
+  segments = (loadJSON(SEG_FILE(), { segments: [] }).segments) || [];
+  if (!Array.isArray(segments)) segments = [];
+  widgetRecs = (loadJSON(WIDGET_FILE(), { widgets: [] }).widgets) || [];
+  if (!Array.isArray(widgetRecs)) widgetRecs = [];
 
   createTray();
   // 开机自启（--hidden）时不弹主窗口，只在后台托盘运行并计时提醒；
   // 需要时点托盘图标 / 再次启动应用会唤出窗口
   if (!startHidden) createWindow();
+  restoreWidgets(); // 恢复上次留在桌面的小组件
 
   setInterval(tick, 10 * 1000);
   tick(); // 立即跑一次（含启动补发）

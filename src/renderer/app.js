@@ -20,6 +20,7 @@ let viewY = new Date().getFullYear();
 let viewM = new Date().getMonth();
 let selectedDate = fmtDate(new Date());
 let remindDraft = []; // 当前编辑任务草稿中的提醒 [{id, offsetMinutes}]
+let suppressClickUntil = 0; // 拖拽结束后短暂抑制 click，避免误选日期
 
 // ---------- 快捷 DOM ----------
 const $ = (s) => document.querySelector(s);
@@ -43,6 +44,113 @@ window.eveBus = (function () {
   };
 })();
 
+// ---------- 插件便捷 API（window.eve）—— 让插件几行代码就能出效果 ----------
+window.eve = (function () {
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  function dock() {
+    let d = document.getElementById('eve-plugin-dock');
+    if (!d) {
+      d = document.createElement('div');
+      d.id = 'eve-plugin-dock';
+      Object.assign(d.style, {
+        position: 'fixed', right: '16px', bottom: '16px', zIndex: 150,
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px',
+      });
+      document.body.appendChild(d);
+    }
+    return d;
+  }
+
+  return {
+    // ---- 数据 ----
+    tasks: () => window.api.listTasks(),
+    saveTask: (t) => window.api.saveTask(t),
+    deleteTask: (id) => window.api.deleteTask(id),
+    segments: () => window.api.listSegments(),
+    saveSegment: (s) => window.api.saveSegment(s),
+    prefs: () => window.api.getPrefs(),
+    setPrefs: (p) => window.api.setPrefs(p),
+
+    // ---- 事件 ----
+    on: (ev, cb) => window.eveBus.on(ev, cb),
+    emit: (ev, d) => window.eveBus.emit(ev, d),
+    onReady: (cb) => window.eveBus.on('eve:ready', cb),
+    onTaskSaved: (cb) => window.eveBus.on('eve:task-saved', cb),
+    onTaskDeleted: (cb) => window.eveBus.on('eve:task-deleted', cb),
+    onDateSelected: (cb) => window.eveBus.on('eve:date-selected', cb),
+    onSegmentSaved: (cb) => window.eveBus.on('eve:segment-saved', cb),
+
+    // ---- 界面 ----
+    toast(msg, ms) {
+      const t = document.createElement('div');
+      t.textContent = String(msg);
+      Object.assign(t.style, {
+        position: 'fixed', left: '50%', bottom: '86px', transform: 'translateX(-50%)',
+        background: '#1f2430', color: '#fff', padding: '8px 16px', borderRadius: '10px',
+        fontSize: '13px', zIndex: 400, boxShadow: '0 6px 20px rgba(0,0,0,.25)',
+        opacity: '0', transition: 'opacity .25s', pointerEvents: 'none', maxWidth: '70vw',
+      });
+      document.body.appendChild(t);
+      requestAnimationFrame(() => { t.style.opacity = '1'; });
+      setTimeout(() => {
+        t.style.opacity = '0';
+        setTimeout(() => t.remove(), 300);
+      }, ms || 2400);
+    },
+
+    // 右下角浮动按钮（返回按钮元素）
+    button(opts) {
+      const o = opts || {};
+      const b = document.createElement('button');
+      if (o.id) b.id = `eve-btn-${o.id}`;
+      b.textContent = o.label || '插件按钮';
+      Object.assign(b.style, {
+        border: 'none', background: 'linear-gradient(135deg,#4f6bff,#8b5cf6)', color: '#fff',
+        fontSize: '13px', fontWeight: '600', padding: '8px 14px', borderRadius: '10px',
+        cursor: 'pointer', boxShadow: '0 4px 14px rgba(79,107,255,.4)',
+      });
+      if (typeof o.onClick === 'function') b.addEventListener('click', o.onClick);
+      dock().appendChild(b);
+      return b;
+    },
+
+    // 浮动面板（带标题与关闭按钮），html 为字符串
+    panel(opts) {
+      const o = opts || {};
+      const wrap = document.createElement('div');
+      if (o.id) wrap.id = `eve-panel-${o.id}`;
+      Object.assign(wrap.style, {
+        position: 'fixed', right: '16px', bottom: '70px', width: (o.width || 260) + 'px',
+        background: '#fff', borderRadius: '14px', boxShadow: '0 14px 40px rgba(16,24,40,.24)',
+        border: '1px solid rgba(16,24,40,.08)', zIndex: 160, overflow: 'hidden',
+        color: '#1f2430',
+      });
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;background:#fbfcff;border-bottom:1px solid #eef0f6">
+          <strong style="font-size:13px">${o.title || '插件面板'}</strong>
+          <button style="border:none;background:transparent;cursor:pointer;color:#9aa1b0;font-size:12px;padding:2px 6px;border-radius:6px">✕</button>
+        </div>
+        <div style="padding:10px 12px;font-size:12.5px;line-height:1.6;max-height:300px;overflow:auto">${o.html || ''}</div>`;
+      wrap.querySelector('button').addEventListener('click', () => wrap.remove());
+      document.body.appendChild(wrap);
+      return wrap;
+    },
+
+    // 移除自己创建的 UI（按 id）
+    remove(id) {
+      const el = document.getElementById(`eve-btn-${id}`) || document.getElementById(`eve-panel-${id}`) || document.getElementById(id);
+      if (el) el.remove();
+    },
+
+    // ---- 日期工具 ----
+    today() {
+      const d = new Date();
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    },
+  };
+})();
+
 // ---------- 规则判断：某任务在 dateStr 这天是否发生 ----------
 function taskOccursOn(task, dateStr) {
   const rule = task.repeat || 'none';
@@ -63,6 +171,45 @@ function tasksOn(dateStr) {
   return tasks
     .filter((t) => taskOccursOn(t, dateStr))
     .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+}
+
+// ---------- 时间段（液体效果） ----------
+function segmentsOn(dateStr) {
+  return segments
+    .filter((s) => s.date === dateStr)
+    .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+}
+
+// 时间段的起止毫秒（结束时间不晚于开始时间时，视为跨夜到次日）
+function segRange(seg) {
+  const start = at(seg.date, seg.start).getTime();
+  let end = at(seg.date, seg.end).getTime();
+  if (end <= start) end += 24 * 60 * 60 * 1000;
+  return { start, end };
+}
+
+// 正在进行中的时间段 → { seg, ratio（剩余比例 0~1）, remainMs }
+function activeSegmentOn(dateStr, nowMs) {
+  const now = nowMs || Date.now();
+  for (const s of segmentsOn(dateStr)) {
+    const { start, end } = segRange(s);
+    if (now >= start && now < end) {
+      const total = end - start;
+      return { seg: s, ratio: total > 0 ? (end - now) / total : 0, remainMs: end - now };
+    }
+  }
+  return null;
+}
+
+function fmtRemain(ms) {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}小时${m}分` : `${m}分钟`;
+}
+
+function segLabel(s) {
+  return `${s.start}-${s.end}`;
 }
 
 // ---------- 渲染月历 ----------
@@ -95,10 +242,29 @@ function renderCalendar() {
     });
     if (dayTasks.length > 3) cellTasks += `<div class="cell-more">还有 ${dayTasks.length - 3} 项…</div>`;
 
-    html += `<div class="day-cell ${inMonth ? '' : 'outside'} ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''}" data-date="${ds}">
+    // 时间段：进行中 → 液体倒计时；未开始/已结束 → 只显示标记行
+    const segs = segmentsOn(ds);
+    const act = activeSegmentOn(ds, nowTick);
+    let segLine = '';
+    if (segs.length) {
+      const s0 = act ? act.seg : segs[0];
+      const label = `${segLabel(s0)}${s0.title ? ' ' + s0.title : ''}`;
+      segLine = `<div class="cell-seg" style="--lc:${esc(s0.color)}" title="${esc(label)}"><i></i>${esc(label)}</div>`;
+    }
+    let liquid = '';
+    if (act) {
+      const pct = Math.max(0, Math.min(100, act.ratio * 100));
+      liquid = `<div class="liquid" style="--lc:${esc(act.seg.color)};height:${pct.toFixed(1)}%">
+        <span class="liquid-pct">${Math.round(pct)}%</span>
+      </div>`;
+    }
+
+    html += `<div class="day-cell ${inMonth ? '' : 'outside'} ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''} ${act ? 'has-liquid' : ''}" data-date="${ds}">
+      ${liquid}
       <div class="day-num">${d.getDate()}</div>
       ${dayImgUrls[ds] ? `<img class="cell-img" src="${dayImgUrls[ds]}" alt="" />` : ''}
       ${cellTasks ? `<div class="cell-tasks">${cellTasks}</div>` : ''}
+      ${segLine}
     </div>`;
   }
   $('#calGrid').innerHTML = html;
@@ -107,12 +273,40 @@ function renderCalendar() {
   $('#monthTitle').textContent = `${viewY}年 ${viewM + 1}月`;
 }
 
+// 每秒刷新液面高度与百分比（不整表重绘；状态切换时才重绘）
+let nowTick = Date.now();
+function updateLiquids() {
+  nowTick = Date.now();
+  let needRerender = false;
+  document.querySelectorAll('.day-cell').forEach((cell) => {
+    const ds = cell.dataset.date;
+    if (!ds) return;
+    const act = activeSegmentOn(ds, nowTick);
+    const el = cell.querySelector('.liquid');
+    const hasSegLine = !!cell.querySelector('.cell-seg');
+    const wantSegLine = segmentsOn(ds).length > 0;
+    if (wantSegLine !== hasSegLine) needRerender = true;
+    if (act) {
+      if (!el) { needRerender = true; return; }
+      const pct = Math.max(0, Math.min(100, act.ratio * 100));
+      el.style.height = pct.toFixed(1) + '%';
+      el.style.setProperty('--lc', act.seg.color);
+      const label = el.querySelector('.liquid-pct');
+      if (label) label.textContent = Math.round(pct) + '%';
+    } else if (el) {
+      needRerender = true; // 时间段结束 → 移除液体
+    }
+  });
+  if (needRerender) renderCalendar();
+}
+
 // 绑定月历格子点击：用事件委托一次性绑定，DOM 重建也不会失效
 let calEventsBound = false;
 function bindCalEvents() {
   if (calEventsBound) return;
   calEventsBound = true;
   document.addEventListener('click', (e) => {
+    if (Date.now() < suppressClickUntil) return; // 刚从日历格子拖出小组件，忽略这次点击
     const cell = e.target.closest('.day-cell');
     if (!cell) return;
     // 点格子内图片贴纸 → 只看大图，不切换选中日
@@ -162,15 +356,41 @@ function renderDayPanel() {
   const wd = WEEK_CN[dt.getDay()];
   $('#dayTitle').innerHTML = `${selectedDate} <span style="color:#9aa1b0;font-size:13px;font-weight:500">周${wd}</span>`;
 
+  const segs = segmentsOn(selectedDate);
   const list = tasksOn(selectedDate);
   const box = $('#dayTasks');
-  if (!list.length) {
-    $('#emptyTip').style.display = 'block';
-    box.querySelectorAll('.task-card').forEach((n) => n.remove());
-    return;
+  box.querySelectorAll('.task-card, .seg-card').forEach((n) => n.remove());
+
+  const isEmpty = !list.length && !segs.length;
+  $('#emptyTip').style.display = isEmpty ? 'block' : 'none';
+  if (isEmpty) $('#emptyTip').textContent = '这一天还没有安排，点「＋ 添加任务」或「⏳」加个时间段吧';
+
+  // 时间段卡片（置顶展示，进行中的显示剩余时间）
+  if (segs.length) {
+    const nowMs = Date.now();
+    const act = activeSegmentOn(selectedDate, nowMs);
+    const frag = document.createDocumentFragment();
+    segs.forEach((s) => {
+      const isActive = !!act && act.seg.id === s.id;
+      const el = document.createElement('div');
+      el.className = `seg-card${isActive ? ' active' : ''}`;
+      el.style.setProperty('--lc', s.color);
+      el.innerHTML = `
+        <span class="seg-time">${esc(segLabel(s))}</span>
+        <span class="seg-title">${esc(s.title || '时间段')}</span>
+        ${isActive ? `<span class="seg-left">剩余 ${esc(fmtRemain(act.remainMs))}</span>` : ''}
+        <span class="seg-actions">
+          <button class="mini-btn" data-act="edit" title="编辑">✎</button>
+          <button class="mini-btn del" data-act="del" title="删除">🗑</button>
+        </span>`;
+      el.querySelector('[data-act="edit"]').addEventListener('click', () => openSegModal(s));
+      el.querySelector('[data-act="del"]').addEventListener('click', () => askDeleteSeg(s));
+      frag.appendChild(el);
+    });
+    box.prepend(frag);
   }
-  $('#emptyTip').style.display = 'none';
-  box.querySelectorAll('.task-card').forEach((n) => n.remove());
+
+  if (!list.length) return;
 
   const REPEAT_CN = { daily: '每天', weekdays: '工作日', weekly: '每周', monthly: '每月' };
   list.forEach((t) => {
@@ -316,20 +536,34 @@ $('#taskForm').addEventListener('submit', async (e) => {
 
 // ---------- 删除 ----------
 let deleteTarget = null;
+let deleteSegTarget = null;
 function askDelete(task) {
   deleteTarget = task;
   $('#confirmText').textContent = `删除任务「${task.title}」？重复任务将同时删除其后续安排。`;
   $('#confirmWrap').hidden = false;
 }
-$('#confirmNo').addEventListener('click', () => { $('#confirmWrap').hidden = true; deleteTarget = null; });
+function askDeleteSeg(seg) {
+  deleteSegTarget = seg;
+  $('#confirmText').textContent = `删除时间段「${segLabel(seg)}${seg.title ? ' ' + seg.title : ''}」？`;
+  $('#confirmWrap').hidden = false;
+}
+$('#confirmNo').addEventListener('click', () => {
+  $('#confirmWrap').hidden = true;
+  deleteTarget = null;
+  deleteSegTarget = null;
+});
 $('#confirmYes').addEventListener('click', async () => {
   if (deleteTarget) {
     await window.api.deleteTask(deleteTarget.id);
     window.eveBus.emit('eve:task-deleted', deleteTarget.id);
     await refresh();
+  } else if (deleteSegTarget) {
+    await window.api.deleteSegment(deleteSegTarget.id);
+    await refresh();
   }
   $('#confirmWrap').hidden = true;
   deleteTarget = null;
+  deleteSegTarget = null;
 });
 
 // ---------- 导航按钮 ----------
@@ -392,6 +626,110 @@ async function renderImgModal() {
     $('#btnRemoveDayImg').hidden = true;
   }
   $('#imgModal').hidden = false;
+}
+
+// ---------- 时间段（液体倒计时）----------
+const SEG_PRESET_COLORS = ['#4f6bff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#ef4444', '#334155'];
+
+function renderSegColors(cur) {
+  const wrap = $('#segColors');
+  wrap.innerHTML = '';
+  SEG_PRESET_COLORS.forEach((c) => {
+    const el = document.createElement('div');
+    el.className = 'theme-swatch' + (c.toLowerCase() === String(cur).toLowerCase() ? ' on' : '');
+    el.style.background = c;
+    el.title = c;
+    el.addEventListener('click', () => {
+      $('#segColor').value = c;
+      renderSegColors(c);
+    });
+    wrap.appendChild(el);
+  });
+}
+
+function openSegModal(seg) {
+  $('#segModalTitle').textContent = seg ? '编辑时间段' : '新建时间段';
+  $('#segId').value = seg ? seg.id : '';
+  $('#segDate').value = seg ? seg.date : selectedDate;
+  const now = new Date();
+  const later = new Date(now.getTime() + 2 * 3600 * 1000);
+  $('#segStart').value = seg ? seg.start : `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  $('#segEnd').value = seg ? seg.end : `${pad(later.getHours())}:${pad(later.getMinutes())}`;
+  $('#segTitle').value = seg ? (seg.title || '') : '';
+  const c = (seg && seg.color) || (prefs.theme && prefs.theme.accent) || '#4f6bff';
+  $('#segColor').value = c;
+  renderSegColors(c);
+  $('#segModal').hidden = false;
+}
+
+$('#btnDaySeg').addEventListener('click', () => openSegModal(null));
+$('#segColor').addEventListener('input', (e) => renderSegColors(e.target.value));
+
+$('#segForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    id: $('#segId').value || undefined,
+    date: $('#segDate').value,
+    start: $('#segStart').value,
+    end: $('#segEnd').value,
+    title: $('#segTitle').value.trim(),
+    color: $('#segColor').value,
+  };
+  if (!payload.date || !payload.start || !payload.end) return;
+  if (payload.start === payload.end) { alert('开始时间与结束时间不能相同'); return; }
+  await window.api.saveSegment(payload);
+  closeModal('segModal');
+  await refresh();
+  window.eveBus.emit('eve:segment-saved', payload);
+});
+
+// ---------- 拖拽日期格子到桌面 → 生成小组件 ----------
+function initWidgetDrag() {
+  const THRESH = 8;
+  let drag = null;
+
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const cell = e.target.closest('.day-cell');
+    if (!cell) return;
+    if (e.target.closest('.cell-img')) return;
+    drag = { date: cell.dataset.date, sx: e.clientX, sy: e.clientY, moved: false };
+  });
+
+  document.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < THRESH) return;
+    drag.moved = true;
+    document.body.classList.add('dragging-widget');
+    const g = $('#dragGhost');
+    g.hidden = false;
+    g.style.left = e.clientX + 'px';
+    g.style.top = e.clientY + 'px';
+    g.textContent = `松手放到桌面 → 「${drag.date}」小组件`;
+  });
+
+  document.addEventListener('pointerup', async (e) => {
+    if (!drag) return;
+    const wasDrag = drag.moved;
+    const date = drag.date;
+    drag = null;
+    document.body.classList.remove('dragging-widget');
+    $('#dragGhost').hidden = true;
+    if (!wasDrag) return;
+    suppressClickUntil = Date.now() + 400; // 拖拽后不触发选中
+    const outX = e.screenX < window.screenX || e.screenX > window.screenX + window.outerWidth;
+    const outY = e.screenY < window.screenY || e.screenY > window.screenY + window.outerHeight;
+    if (outX || outY) {
+      const r = await window.api.createWidget({ date, x: e.screenX - 116, y: e.screenY - 40 });
+      if (r && r.ok) window.eveBus.emit('eve:widget-created', date);
+    }
+  });
+
+  document.addEventListener('pointercancel', () => {
+    drag = null;
+    document.body.classList.remove('dragging-widget');
+    $('#dragGhost').hidden = true;
+  });
 }
 
 // ---------- 日历整体背景：视频 / 图片幻灯片 / 单图（优先级从高到低） ----------
@@ -789,6 +1127,23 @@ async function renderPluginList() {
 $('#btnOpenPluginDir').addEventListener('click', async () => {
   try { await window.api.openPluginDir(); } catch (e) { alert('无法打开插件目录'); }
 });
+$('#btnCreateDemoPlugin').addEventListener('click', async () => {
+  try {
+    const r = await window.api.createDemoPlugin();
+    if (r && r.ok) {
+      alert('已生成示例插件 demo-hello.js 并打开文件。\n重启应用后生效，可在插件列表里启停。');
+      await renderPluginList();
+    } else {
+      alert('生成失败：' + ((r && r.error) || '未知错误'));
+    }
+  } catch (e) { alert('生成失败'); }
+});
+$('#btnPluginGuide').addEventListener('click', async () => {
+  try {
+    const r = await window.api.openPluginGuide();
+    if (!r || !r.ok) alert('打开教程失败：' + ((r && r.error) || '未知错误'));
+  } catch (e) { alert('打开教程失败'); }
+});
 $('#sAccent').addEventListener('input', (e) => setThemeColor('accent', e.target.value));
 $('#sAccentBg').addEventListener('input', (e) => setThemeColor('bg', e.target.value));
 $('#sWeekStart').addEventListener('change', async (e) => {
@@ -819,6 +1174,7 @@ window.api.onFocusTask(async (taskId) => {
 // ---------- 初始化 ----------
 async function refresh() {
   tasks = await window.api.listTasks();
+  segments = await window.api.listSegments();
   renderCalendar();
   renderDayPanel();
 }
@@ -832,6 +1188,17 @@ async function refresh() {
   await refresh();
   bindCalEvents();
   initBgPeek();
+  initWidgetDrag();
+  setInterval(updateLiquids, 1000); // 液体倒计时：每秒刷新液面
+  // 桌面小组件双击标题 → 主窗口跳到该日期
+  window.api.onFocusDate((dateStr) => {
+    const d = dateOf(dateStr);
+    viewY = d.getFullYear();
+    viewM = d.getMonth();
+    selectedDate = dateStr;
+    renderCalendar();
+    renderDayPanel();
+  });
   await loadPlugins(); // 加载启用的渲染层插件（此时 eveBus 与 window.api 均已就绪）
   window.eveBus.__ready = true;
   window.eveBus.emit('eve:ready');

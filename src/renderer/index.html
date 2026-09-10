@@ -39,6 +39,7 @@
         <div class="day-head">
           <h3 id="dayTitle"></h3>
           <div class="day-head-actions">
+            <button class="icon-btn small" id="btnDaySeg" title="给这一天添加时间段（液体倒计时）">⏳</button>
             <button class="icon-btn small" id="btnDayImg" title="给这一天设置图片">📷</button>
             <button class="primary-btn small" id="btnAddTask">＋ 添加任务</button>
           </div>
@@ -195,9 +196,11 @@
           <label>插件（开源扩展口）</label>
           <div id="pluginList"></div>
           <div class="theme-custom">
+            <button type="button" class="ghost-btn small" id="btnCreateDemoPlugin">创建示例插件</button>
+            <button type="button" class="ghost-btn small" id="btnPluginGuide">插件开发教程</button>
             <button type="button" class="ghost-btn small" id="btnOpenPluginDir">打开插件目录…</button>
           </div>
-          <p class="hint">每个插件是插件目录下的一个文件夹（plugin.json + renderer.js）。勾选/取消在下次启动时生效。开发文档见项目 README 的「插件口」章节。</p>
+          <p class="hint">写插件很简单：把一个 .js 文件丢进插件目录就是一个插件（文件顶部用注释写名称即可）；也支持「文件夹 + plugin.json」的高级写法。点「插件开发教程」查看完整文档；勾选/取消在下次启动时生效。</p>
         </div>
         <p class="hint">提醒通过 Windows 系统通知发出，日历窗口最小化或隐藏到托盘也会准时提醒。关闭窗口 = 最小化到托盘（右下角图标），从托盘菜单「退出」才会真正退出。</p>
       </div>
@@ -225,6 +228,53 @@
         </div>
         <p class="hint">选中的图片会以贴纸形式显示在该日期格子的右上角，点击格子弹大图查看。</p>
       </div>
+    </div>
+  </div>
+
+  <!-- 拖拽到桌面生成小组件的浮标 -->
+  <div id="dragGhost" hidden></div>
+
+  <!-- 时间段弹窗（液体倒计时） -->
+  <div class="modal-mask" id="segModal" hidden>
+    <div class="modal modal-sm">
+      <div class="modal-head">
+        <h3 id="segModalTitle">新建时间段</h3>
+        <button class="icon-btn" data-close="segModal">✕</button>
+      </div>
+      <form id="segForm" autocomplete="off">
+        <input type="hidden" id="segId" />
+        <div class="field">
+          <label>日期</label>
+          <input type="date" id="segDate" required />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>开始时间</label>
+            <input type="time" id="segStart" required />
+          </div>
+          <div class="field">
+            <label>结束时间</label>
+            <input type="time" id="segEnd" required />
+          </div>
+        </div>
+        <div class="field">
+          <label>名称（可选）</label>
+          <input type="text" id="segTitle" placeholder="如：专注工作 / 学习 / 运动" maxlength="40" />
+        </div>
+        <div class="field">
+          <label>液体颜色</label>
+          <div class="theme-row" id="segColors"></div>
+          <div class="theme-custom">
+            <input type="color" id="segColor" value="#4f6bff" />
+            <span class="hint">自定义液体颜色</span>
+          </div>
+        </div>
+        <p class="hint">时间段进行中时，该日期的日历格子里会出现液体：剩余时间越多液面越高，随时间流逝逐渐流干，并显示剩余百分比。</p>
+        <div class="modal-foot">
+          <button type="button" class="ghost-btn" data-close="segModal">取消</button>
+          <button type="submit" class="primary-btn">保存</button>
+        </div>
+      </form>
     </div>
   </div>
 

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:; media-src 'self' data: file:" />
+  <title>日历小组件</title>
+  <link rel="stylesheet" href="widget.css" />
+</head>
+<body>
+  <div class="wd-card" id="wdCard">
+    <div class="wd-head" id="wdHead">
+      <div class="wd-date" id="wdDate">—</div>
+      <div class="wd-btns">
+        <button id="wdPin" class="wd-btn" title="切换置顶">📌</button>
+        <button id="wdClose" class="wd-btn" title="关闭小组件">✕</button>
+      </div>
+    </div>
+    <div class="wd-list" id="wdList"></div>
+    <div class="wd-foot" id="wdFoot"></div>
+    <div class="liquid" id="wdLiquid" hidden><span class="liquid-pct" id="wdPct"></span></div>
+  </div>
+  <script src="widget.js"></script>
+</body>
+</html>

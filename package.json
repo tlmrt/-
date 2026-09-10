@@ -18,7 +18,8 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "extras/**/*"
+      "extras/**/*",
+      "docs/**/*"
     ],
     "win": {
       "target": [
