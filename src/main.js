@@ -1186,14 +1186,15 @@ ipcMain.handle('maa:startForDate', (e, date) => {
   return maaStartWithOptions(taskName, {});
 });
 
-ipcMain.handle('maa:configUpdateTasks', (e, { updates }) => {
+ipcMain.handle('maa:configUpdateTasks', (e, { updates, config }) => {
   const r = readMaaConfig();
   if (!r.ok) return r;
   const { json, ps } = r;
   const configs = json.Configurations || {};
-  const current = json.Current && configs[json.Current] ? json.Current : Object.keys(configs)[0];
-  const cfg = configs[current];
-  if (!cfg || !Array.isArray(cfg.TaskQueue)) return { ok: false, error: '当前配置里没有任务队列' };
+  // 明确按调用方指定的配置写入（面板显示哪套就改哪套），避免误改共享配置
+  const target = config && configs[config] ? config : (json.Current && configs[json.Current] ? json.Current : Object.keys(configs)[0]);
+  const cfg = configs[target];
+  if (!cfg || !Array.isArray(cfg.TaskQueue)) return { ok: false, error: '配置里没有任务队列：' + target };
   let changed = 0;
   for (const u of (Array.isArray(updates) ? updates : [])) {
     const idx = Number(u && u.index);
@@ -1203,8 +1204,8 @@ ipcMain.handle('maa:configUpdateTasks', (e, { updates }) => {
   }
   const w = writeMaaConfig(ps, json);
   if (!w.ok) return w;
-  console.log('[maa] 已更新 MAA 配置', changed, '项 →', ps.file);
-  return { ok: true, changed, file: ps.file, tasks: buildEditableQueue(cfg.TaskQueue) };
+  console.log('[maa] 已更新配置', target, changed, '项 →', ps.file);
+  return { ok: true, changed, config: target, file: ps.file, tasks: buildEditableQueue(cfg.TaskQueue) };
 });
 
 ipcMain.handle('maa:configSetCurrent', (e, name) => {

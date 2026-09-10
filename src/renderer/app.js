@@ -1529,7 +1529,6 @@ $('#btnMaaStop').addEventListener('click', async () => {
 let maaPanelData = null;
 let maaPanelDate = null;
 
-$('#btnMaaPanel').addEventListener('click', () => openMaaPanel(selectedDate));
 $('#btnDayMaa').addEventListener('click', () => openMaaPanel(selectedDate));
 
 // 为某天建议一个 MAA 配置名（与 maaconfig.suggestConfigName 同规则）
@@ -1562,7 +1561,7 @@ async function loadMaaPanel() {
   maaPanelData = r;
   $('#maaPanelDate').textContent = maaPanelDate || '未选择日期';
   $('#maaBindDate').checked = !!r.bound;
-  $('#maaPanelStatus').textContent = `已载入 ${r.tasks.length} 个任务 · ${r.startDirectly ? '启动后直接运行' : '启动后需手动开始'}`;
+  $('#maaPanelStatus').textContent = `已载入 ${r.tasks.length} 个任务 · 当前编辑：${r.current}${r.bound ? '（这一天专属）' : '（共享配置，改动会影响到所有未单独配置的日子）'}`;
   const sel = $('#maaCfgSelect');
   sel.innerHTML = '';
   (r.configs || []).forEach((n) => {
@@ -1637,14 +1636,36 @@ function collectMaaUpdates() {
 $('#btnMaaPanelSave').addEventListener('click', async () => {
   const msg = $('#maaPanelMsg');
   if (!maaPanelData) { msg.textContent = '没有可保存的数据'; return; }
+  const updates = collectMaaUpdates(); // 先收集用户改动（后面可能重载面板）
+  let targetConfig = maaPanelData.current;
+
+  // 未绑定独立配置时提醒：保存会改到共享配置，影响其它日子
+  if (maaPanelDate && !$('#maaBindDate').checked) {
+    const ok = confirm(
+      `当前编辑的是共享配置「${maaPanelData.current}」，保存会影响到所有未单独配置的日子。\n\n是否先为 ${maaPanelDate} 创建一套专属配置，再保存改动？`,
+    );
+    if (ok) {
+      const typed = $('#maaNewCfgName').value.trim();
+      const name = typed || suggestMaaConfigName(maaPanelDate, maaPanelData.configs || []);
+      const cr = await window.api.maaConfigCreate(name, maaPanelData.current);
+      if (!cr || !cr.ok) {
+        msg.textContent = '创建专属配置失败：' + ((cr && cr.error) || '未知错误');
+        return;
+      }
+      await window.api.maaSetDateConfig(maaPanelDate, cr.name);
+      targetConfig = cr.name;
+      $('#maaNewCfgName').value = '';
+    }
+  }
+
   const btn = $('#btnMaaPanelSave');
   btn.disabled = true;
   msg.textContent = '保存中…';
   try {
-    const r = await window.api.maaConfigUpdateTasks(collectMaaUpdates());
+    const r = await window.api.maaConfigUpdateTasks(updates, targetConfig);
     if (r && r.ok) {
-      msg.textContent = `已保存 ${r.changed} 个任务到 MAA 配置`;
-      if (r.tasks) renderMaaTaskList(r.tasks);
+      msg.textContent = `已保存 ${r.changed} 个任务到配置「${r.config}」`;
+      await loadMaaPanel();
     } else {
       msg.textContent = '保存失败：' + ((r && r.error) || '未知错误');
     }
@@ -1678,17 +1699,18 @@ $('#maaBindDate').addEventListener('change', async (e) => {
   await loadMaaPanel();
 });
 
-// 为这一天新建一套配置（复制当前配置）
+// 为这一天创建专属配置（复制当前配置）并绑定
 $('#btnMaaCreateForDate').addEventListener('click', async () => {
   if (!maaPanelData) { alert('请先成功载入 MAA 配置'); return; }
   if (!maaPanelDate) { alert('请先在日历里选择一天'); return; }
-  const defaultName = suggestMaaConfigName(maaPanelDate, maaPanelData.configs || []);
-  const name = prompt(`为 ${maaPanelDate} 新建一套 MAA 配置（会复制「${maaPanelData.current}」的任务设置）`, defaultName);
-  if (!name || !name.trim()) return;
-  const r = await window.api.maaConfigCreate(name.trim(), maaPanelData.current);
+  const typed = $('#maaNewCfgName').value.trim();
+  const name = typed || suggestMaaConfigName(maaPanelDate, maaPanelData.configs || []);
+  const r = await window.api.maaConfigCreate(name, maaPanelData.current);
   if (!r || !r.ok) { alert('创建失败：' + ((r && r.error) || '未知错误')); return; }
   await window.api.maaSetDateConfig(maaPanelDate, r.name);
+  $('#maaNewCfgName').value = '';
   await loadMaaPanel();
+  $('#maaPanelMsg').textContent = `已为 ${maaPanelDate} 创建专属配置「${r.name}」，之后的修改只影响这一天`;
 });
 
 $('#btnMaaPanelStart').addEventListener('click', async () => {

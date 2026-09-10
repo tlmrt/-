@@ -23,7 +23,6 @@
         <button class="icon-btn" id="btnNext" title="下个月">›</button>
       </div>
       <div class="top-actions">
-        <button class="icon-btn" id="btnMaaPanel" title="MAA 任务（一键长草）">🎮</button>
         <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
       </div>
     </header>
@@ -441,8 +440,9 @@
         <div class="maa-panel-bar maa-date-bar">
           <span class="opacity-label">这一天</span>
           <span class="holi-status" id="maaPanelDate" style="margin:0">—</span>
-          <label class="inline-check" style="margin:0"><input type="checkbox" id="maaBindDate" /> 使用独立配置（不同日子可用不同的一键长草配置）</label>
-          <button type="button" class="ghost-btn small" id="btnMaaCreateForDate">为这一天新建配置…</button>
+          <label class="inline-check" style="margin:0"><input type="checkbox" id="maaBindDate" /> 使用独立配置（不同日子用不同的一键长草配置）</label>
+          <input type="text" id="maaNewCfgName" placeholder="新配置名（留空自动命名）" />
+          <button type="button" class="ghost-btn small" id="btnMaaCreateForDate">创建专属配置并绑定</button>
         </div>
         <p class="hint">下面就是 MAA 配置文件里的任务队列（等同 MAA 的「一键长草」）：勾选要执行的任务、按需改参数，改完点右下角「保存到 MAA 配置」。保存后 MAA 启动即按这份配置运行（MAA 里开启"运行前直接开始"时会自动开跑）。</p>
         <div id="maaTaskList" class="maa-task-list"></div>

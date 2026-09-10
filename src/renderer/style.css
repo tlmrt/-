@@ -906,6 +906,14 @@ body.dragging-widget .day-cell { cursor: grabbing; }
   border-radius: 10px;
   padding: 6px 10px;
 }
+.maa-date-bar input[type="text"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  outline: none;
+  min-width: 170px;
+}
 .maa-panel-bar select {
   border: 1px solid var(--border);
   border-radius: 8px;

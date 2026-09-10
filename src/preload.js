@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('api', {
   maaRunTask: (taskId) => ipcRenderer.invoke('maa:runTask', taskId),
   // MAA 任务配置（读写 MAA 的「一键长草」配置）
   maaConfigLoad: (date) => ipcRenderer.invoke('maa:configLoad', { date }),
-  maaConfigUpdateTasks: (updates) => ipcRenderer.invoke('maa:configUpdateTasks', { updates }),
+  maaConfigUpdateTasks: (updates, config) => ipcRenderer.invoke('maa:configUpdateTasks', { updates, config }),
   maaConfigSetCurrent: (name) => ipcRenderer.invoke('maa:configSetCurrent', name),
   maaConfigCreate: (name, from) => ipcRenderer.invoke('maa:configCreate', { name, from }),
   maaConfigOpenDir: () => ipcRenderer.invoke('maa:configOpenDir'),
