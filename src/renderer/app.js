@@ -506,9 +506,9 @@ function renderDayPanel() {
       </div>
       ${t.note ? `<div class="tc-note">${esc(t.note)}</div>` : ''}
       <div class="tc-bottom">
-        <div class="tc-tags">${tagHtml}${t.maa && t.maa.enabled ? `<span class="maa-tag" title="到点自动启动 MAA：${esc(t.maa.task)}">🎮 ${esc(t.maa.task)}</span>` : ''}</div>
+        <div class="tc-tags">${tagHtml}${hasMaaReminder(t) ? '<span class="maa-tag" title="到点会启动 MAA">🎮 启动 MAA</span>' : ''}</div>
         <div class="tc-actions">
-          ${t.maa && t.maa.enabled ? '<button class="mini-btn" data-act="maa" title="立即启动 MAA">▶</button>' : ''}
+          ${hasMaaReminder(t) ? '<button class="mini-btn" data-act="maa" title="立即启动 MAA">▶</button>' : ''}
           <button class="mini-btn" data-act="edit" title="编辑">✎</button>
           <button class="mini-btn del" data-act="del" title="删除">🗑</button>
         </div>
@@ -543,19 +543,39 @@ const OFFSET_CHOICES = [
 function renderReminders() {
   const wrap = $('#reminderList');
   wrap.innerHTML = '';
+  if (!remindDraft.length) {
+    wrap.innerHTML = '<div class="hint" style="margin:0 0 6px">还没有提醒。点下面「＋ 添加提醒」加一条，可设为「弹通知提醒」或「🎮 启动 MAA」。</div>';
+    return;
+  }
   remindDraft.forEach((r, i) => {
     const row = document.createElement('div');
     row.className = 'reminder-row';
+    const offOpts = OFFSET_CHOICES
+      .map(([v, l]) => `<option value="${v}" ${Number(r.offsetMinutes) === Number(v) ? 'selected' : ''}>${l}</option>`)
+      .join('');
     row.innerHTML = `
-      <span class="rm-time">任务开始前</span>
-      <span class="rm-desc">${offsetDesc(r.offsetMinutes)}</span>
-      <button type="button" class="rm-del" data-i="${i}">✕</button>`;
+      <select class="rm-off" title="什么时候触发">${offOpts}</select>
+      <select class="rm-act ${r.action === 'maa' ? 'maa' : ''}" title="到点做什么">
+        <option value="notify" ${r.action === 'maa' ? '' : 'selected'}>弹通知提醒</option>
+        <option value="maa" ${r.action === 'maa' ? 'selected' : ''}>🎮 启动 MAA</option>
+      </select>
+      <button type="button" class="rm-del" data-i="${i}" title="删除这条提醒">✕</button>`;
+    row.querySelector('.rm-off').addEventListener('change', (e) => { remindDraft[i].offsetMinutes = Number(e.target.value); });
+    row.querySelector('.rm-act').addEventListener('change', (e) => {
+      remindDraft[i].action = e.target.value === 'maa' ? 'maa' : 'notify';
+      renderReminders();
+    });
     row.querySelector('.rm-del').addEventListener('click', () => {
       remindDraft.splice(i, 1);
       renderReminders();
     });
     wrap.appendChild(row);
   });
+}
+
+// 是否含"启动 MAA"的提醒
+function hasMaaReminder(task) {
+  return !!(task && ((task.maa && task.maa.enabled) || (task.reminders || []).some((r) => r && r.action === 'maa')));
 }
 
 function openTaskModal(task) {
@@ -570,40 +590,20 @@ function openTaskModal(task) {
   $('#fTags').value = task && task.tags ? task.tags.join(', ') : '';
   $('#fNote').value = task ? (task.note || '') : '';
   remindDraft = task && task.reminders && task.reminders.length
-    ? task.reminders.map((r) => ({ id: r.id, offsetMinutes: Number(r.offsetMinutes) || 0 }))
-    : [{ id: 'r0', offsetMinutes: 0 }];
+    ? task.reminders.map((r) => ({
+      id: r.id,
+      offsetMinutes: Number(r.offsetMinutes) || 0,
+      action: r.action === 'maa' ? 'maa' : 'notify',
+    }))
+    : [];
+  // 兼容旧数据：以前的任务级"到点启动 MAA"迁移成一条「启动 MAA」提醒项
+  if (task && task.maa && task.maa.enabled && !remindDraft.some((r) => r.action === 'maa')) {
+    remindDraft.push({ id: 'r_maa_' + (task.id || Date.now().toString(36)), offsetMinutes: 0, action: 'maa' });
+  }
   renderReminders();
-
-  // MAA 联动（任务级）
-  renderMaaTaskField(task);
 
   $('#taskModal').hidden = false;
 }
-
-// 任务弹窗里的 MAA 联动字段
-function renderMaaTaskField(task) {
-  const cur = (task && task.maa) || {};
-  const preset = (prefs.maa && Array.isArray(prefs.maa.tasks)) ? prefs.maa.tasks : [];
-  const enabled = !!cur.enabled;
-  $('#fMaaEnabled').checked = enabled;
-  $('#maaTaskWrap').hidden = !enabled;
-  const names = [...new Set([...(cur.task ? [cur.task] : []), ...preset])];
-  if (!names.length) names.push((prefs.maa && prefs.maa.autoStartTask) || '默认');
-  const sel = $('#fMaaTask');
-  sel.innerHTML = '';
-  names.forEach((n) => {
-    const o = document.createElement('option');
-    o.value = n;
-    o.textContent = n;
-    sel.appendChild(o);
-  });
-  sel.value = cur.task || names[0];
-  $('#fMaaAutoStop').value = cur.autoStopMin ? String(cur.autoStopMin) : '';
-}
-
-$('#fMaaEnabled').addEventListener('change', (e) => {
-  $('#maaTaskWrap').hidden = !e.target.checked;
-});
 
 function closeModal(id) {
   document.getElementById(id).hidden = true;
@@ -616,23 +616,14 @@ document.querySelectorAll('.modal-mask').forEach((m) => {
   m.addEventListener('click', (e) => { if (e.target === m) m.hidden = true; });
 });
 
-// 添加提醒下拉 + 按钮
+// 添加提醒：直接追加一行（时间/动作在行内选择）
 $('#btnAddReminder').addEventListener('click', () => {
-  const picker = document.createElement('div');
-  picker.className = 'reminder-add-row';
-  picker.innerHTML = `
-    <select>${OFFSET_CHOICES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
-    <button type="button">确定</button>`;
-  picker.querySelector('button').addEventListener('click', () => {
-    const v = Number(picker.querySelector('select').value);
-    remindDraft.push({ id: 'r_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), offsetMinutes: v });
-    picker.remove();
-    renderReminders();
+  remindDraft.push({
+    id: 'r_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    offsetMinutes: 0,
+    action: 'notify',
   });
-  picker.querySelector('select').addEventListener('keydown', (e) => { if (e.key === 'Escape') picker.remove(); });
-  // 追加到按钮之前
-  $('#btnAddReminder').insertAdjacentElement('beforebegin', picker);
-  picker.querySelector('select').focus();
+  renderReminders();
 });
 
 // 表单提交
@@ -652,12 +643,11 @@ $('#taskForm').addEventListener('submit', async (e) => {
     tags,
     priority: $('#fPriority').value,
     repeat: $('#fRepeat').value,
-    reminders: remindDraft.map((r) => ({ id: r.id, offsetMinutes: r.offsetMinutes })),
-    maa: {
-      enabled: $('#fMaaEnabled').checked,
-      task: $('#fMaaTask').value || ((prefs.maa && prefs.maa.autoStartTask) || '默认'),
-      autoStopMin: Math.max(0, Math.round(Number($('#fMaaAutoStop').value) || 0)),
-    },
+    reminders: remindDraft.map((r) => ({
+      id: r.id,
+      offsetMinutes: r.offsetMinutes,
+      action: r.action === 'maa' ? 'maa' : 'notify',
+    })),
   };
   await window.api.saveTask(payload);
   window.eveBus.emit('eve:task-saved', payload);

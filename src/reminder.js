@@ -82,14 +82,17 @@ function computeAlertsInWindow(task, fromMs, toMs) {
   const reminders = (task.reminders && task.reminders.length ? task.reminders : [{ id: 'r0', offsetMinutes: 0 }]);
   for (const r of reminders) {
     const off = Number(r.offsetMinutes) || 0;
+    // 提醒动作：notify=弹通知（默认）；maa=启动 MAA
+    const action = r.action === 'maa' ? 'maa' : 'notify';
     // alertAt = occ - off 落在 [from,to] ⟺ occ 落在 [from+off, to+off]
     const lo = from.add(off, 'minute');
     const hi = to.add(off, 'minute');
     for (const occ of occurrenceCandidates(lo, hi)) {
       const alertAt = occ.subtract(off, 'minute');
       if (alertAt.isBefore(from) || alertAt.isAfter(to)) continue;
-      const key = occ.format('YYYYMMDDHHmm') + '_' + off;
-      out.push({ taskId: task.id, key, alertAt: alertAt.valueOf(), title: task.title, task });
+      // key 保持旧格式（通知），MAA 动作加后缀，避免同一任务的两种动作相互顶掉
+      const key = occ.format('YYYYMMDDHHmm') + '_' + off + (action === 'maa' ? '_maa' : '');
+      out.push({ taskId: task.id, key, alertAt: alertAt.valueOf(), title: task.title, action, task });
     }
   }
   return out;

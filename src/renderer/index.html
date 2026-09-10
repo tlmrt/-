@@ -105,20 +105,10 @@
         </div>
 
         <div class="field">
-          <label>提醒（可添加多条）</label>
+          <label>提醒（可添加多条，每条可选"弹通知"或"启动 MAA"）</label>
           <div id="reminderList"></div>
           <button type="button" class="ghost-btn small" id="btnAddReminder">＋ 添加提醒</button>
-        </div>
-
-        <div class="field maa-field">
-          <label class="inline-check"><input type="checkbox" id="fMaaEnabled" /> 🎮 到点时自动启动 MAA</label>
-          <div id="maaTaskWrap" hidden>
-            <div class="theme-custom">
-              <select id="fMaaTask"></select>
-              <input type="number" id="fMaaAutoStop" min="0" max="1440" placeholder="自动停止(分钟)" />
-            </div>
-            <p class="hint">任务到点提醒时会自动拉起 MAA（已在运行则跳过）；自动停止填 0 表示不自动停止，留空则用设置里的默认值。</p>
-          </div>
+          <p class="hint">选「弹通知提醒」到点会弹系统通知；选「🎮 启动 MAA」到点会直接拉起 MAA（按该日期在 MAA 面板里绑定的配置运行）。</p>
         </div>
 
         <div class="modal-foot">

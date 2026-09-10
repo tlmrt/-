@@ -132,5 +132,45 @@ console.log('\n[7] 重复任务 + 提前量（daily 每天 09:00，提前 30 分
   eq('11-02 08:30 命中提前提醒', alerts.map(a => a.key), ['202611020900_30']);
 }
 
+console.log('\n[8] 提醒动作：弹通知 / 启动 MAA');
+
+{
+  const target = dayjs('2026-11-05T09:00:00');
+  const t = mkTask({
+    date: '2026-11-05', time: '09:00',
+    reminders: [
+      { id: 'a', offsetMinutes: 0, action: 'notify' },
+      { id: 'b', offsetMinutes: 5, action: 'maa' },
+    ],
+  });
+  const alerts = computeAlertsInWindow(t, target.valueOf() - 1000, target.valueOf() + 1000);
+  eq('到点只命中通知那条', alerts.map(a => a.action), ['notify']);
+
+  const maaWin = dayjs('2026-11-05T08:55:00');
+  const a2 = computeAlertsInWindow(t, maaWin.valueOf() - 1000, maaWin.valueOf() + 1000);
+  eq('提前 5 分钟命中 MAA 动作', a2.map(a => a.action), ['maa']);
+  eq('MAA 动作 key 带 _maa 后缀', a2.map(a => a.key), ['202611050900_5_maa']);
+  eq('通知动作 key 保持原格式', alerts.map(a => a.key), ['202611050900_0']);
+}
+
+{
+  const target = dayjs('2026-12-01T20:00:00');
+  const t = mkTask({
+    date: '2026-12-01', time: '20:00',
+    reminders: [
+      { id: 'a', offsetMinutes: 0, action: 'notify' },
+      { id: 'b', offsetMinutes: 0, action: 'maa' },
+    ],
+  });
+  const alerts = computeAlertsInWindow(t, target.valueOf() - 1000, target.valueOf() + 1000);
+  eq('同一时刻两种动作各命中一次', alerts.length, 2);
+  eq('两者 key 不冲突', new Set(alerts.map(a => a.key)).size, 2);
+  const legacy = computeAlertsInWindow(
+    mkTask({ date: '2026-12-01', time: '20:00' }),
+    target.valueOf() - 1000, target.valueOf() + 1000,
+  );
+  eq('旧数据（无 action）默认按通知处理', legacy.map(a => a.action), ['notify']);
+}
+
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

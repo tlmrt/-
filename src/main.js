@@ -191,7 +191,12 @@ function tick() {
       const t = a.task;
       t._notifiedKeys = t._notifiedKeys || [];
       t._notifiedKeys.push(a.key);
-      fireNotification(t, a);
+      if (a.action === 'maa') {
+        // 提醒项的动作是"启动 MAA"：不弹通知，直接拉起 MAA
+        maybeStartMaaForTask(t, { force: true });
+      } else {
+        fireNotification(t, a);
+      }
     }
     saveTasks();
   }
@@ -317,6 +322,14 @@ function sanitizeTask(input) {
   const t = { ...input };
   delete t._notifiedKeys; // 通知记录由主进程管理
   if (t.reminders && !Array.isArray(t.reminders)) delete t.reminders;
+  // 归一化提醒项：offsetMinutes + action(notify|maa)
+  if (Array.isArray(t.reminders)) {
+    t.reminders = t.reminders.map((r, i) => ({
+      id: (r && r.id) || ('r_' + i + '_' + Math.random().toString(36).slice(2, 6)),
+      offsetMinutes: Number(r && r.offsetMinutes) || 0,
+      action: r && r.action === 'maa' ? 'maa' : 'notify',
+    }));
+  }
   return t;
 }
 
@@ -772,11 +785,12 @@ function maaStartWithOptions(taskName, opts) {
   return r;
 }
 
-// 任务到点：若该任务启用了 MAA 联动，则自动启动 MAA
-function maybeStartMaaForTask(task) {
+// 任务到点：启动 MAA（opts.force=true 表示由「启动 MAA」提醒项触发，不受旧任务级开关限制）
+function maybeStartMaaForTask(task, opts) {
   try {
+    const force = !!(opts && opts.force);
     const m = normalizeTaskMaa(task && task.maa, maaPrefsLocal().autoStartTask);
-    if (!m.enabled) return null;
+    if (!m.enabled && !force) return null;
     // 若任务所在日期绑定了某套 MAA 配置，先切过去再启动
     if (task && task.date) {
       const applied = applyDateConfig(task.date);
