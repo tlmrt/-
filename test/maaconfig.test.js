@@ -10,6 +10,8 @@ const {
   buildEditableQueue,
   applyTaskPatch,
   suggestConfigName,
+  normalizeStageCode,
+  searchLevels,
 } = require('../src/maaconfig');
 
 let pass = 0, fail = 0;
@@ -100,6 +102,30 @@ console.log('\n[6] 按日期生成 MAA 配置名');
   ok('多次重名继续递增', suggestConfigName('2026-09-12', ['日历-0912', '日历-0912-2']) === '日历-0912-3');
   ok('日期为空时有兜底名', suggestConfigName('', []) === '日历配置');
   ok('非法入参安全', suggestConfigName(null, null) === '日历配置');
+}
+
+console.log('\n[7] 关卡匹配与搜索（配合 MAA stages.json）');
+{
+  const levels = [
+    { code: '1-7', stageId: 'main_01-07', apCost: 6, drops: ['基础作战记录', '固源岩'] },
+    { code: 'CE-6', stageId: 'wk_melee_6', apCost: 36, drops: ['龙门币'] },
+    { code: 'LS-5', stageId: 'wk_kc_5', apCost: 30, drops: ['初级作战记录', '中级作战记录'] },
+    { code: 'AP-5', stageId: 'wk_toxic_5', apCost: 30, drops: ['采购凭证'] },
+  ];
+  ok('精确匹配', normalizeStageCode('CE-6', levels) === 'CE-6');
+  ok('大小写容错（ce-6）', normalizeStageCode('ce-6', levels) === 'CE-6');
+  ok('忽略分隔符（ce6）', normalizeStageCode('ce6', levels) === 'CE-6');
+  ok('忽略空格（1 7）', normalizeStageCode('1 7', levels) === '1-7');
+  ok('前缀匹配', normalizeStageCode('LS', levels) === 'LS-5');
+  ok('去除多余前后缀（ap5）', normalizeStageCode('ap5', levels) === 'AP-5');
+  ok('找不到返回 null', normalizeStageCode('ZZ-9', levels) === null);
+  ok('空输入返回 null', normalizeStageCode('', levels) === null && normalizeStageCode(null, levels) === null);
+
+  ok('搜索：代号命中排最前', searchLevels('CE', levels)[0].code === 'CE-6');
+  ok('搜索：按掉落物名匹配', searchLevels('作战记录', levels).map((l) => l.code).includes('LS-5'));
+  ok('搜索：空关键词返回前若干个', searchLevels('', levels).length === levels.length);
+  ok('搜索：无匹配返回空数组', searchLevels('zzzz', levels).length === 0);
+  ok('搜索：可限制条数', searchLevels('', levels, 2).length === 2);
 }
 
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);

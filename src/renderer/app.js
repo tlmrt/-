@@ -1518,6 +1518,63 @@ $('#btnMaaStop').addEventListener('click', async () => {
 // ---------- MAA 任务面板（与「一键长草」一致的配置界面） ----------
 let maaPanelData = null;
 let maaPanelDate = null;
+let maaLevels = [];        // MAA 关卡清单（来自 MAA 的 resource/stages.json）
+let maaLevelsError = '';
+
+async function ensureMaaLevels(force) {
+  if (maaLevels.length && !force) return true;
+  try {
+    const r = await window.api.maaLevels(!!force);
+    if (r && r.ok) {
+      maaLevels = r.levels || [];
+      maaLevelsError = '';
+      return true;
+    }
+    maaLevels = [];
+    maaLevelsError = (r && r.error) || '未知错误';
+    return false;
+  } catch (e) {
+    maaLevels = [];
+    maaLevelsError = String(e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+// 关卡匹配（与 src/maaconfig.js 同规则）
+function stageKeyLocal(s) {
+  return String(s == null ? '' : s).toUpperCase().replace(/[\s\-_]/g, '');
+}
+
+function normalizeStageCodeLocal(input) {
+  const raw = String(input == null ? '' : input).trim();
+  if (!raw) return null;
+  const key = stageKeyLocal(raw);
+  if (!key) return null;
+  return (maaLevels.find((l) => stageKeyLocal(l.code) === key)
+    || maaLevels.find((l) => stageKeyLocal(l.code).startsWith(key))
+    || maaLevels.find((l) => stageKeyLocal(l.code).endsWith(key))
+    || {}).code || null;
+}
+
+function searchLevelsLocal(keyword) {
+  const raw = String(keyword == null ? '' : keyword).trim();
+  if (!raw) return maaLevels.slice(0, 12);
+  const key = stageKeyLocal(raw);
+  const lower = raw.toLowerCase();
+  const scored = [];
+  for (const l of maaLevels) {
+    const ck = stageKeyLocal(l.code);
+    let score = 0;
+    if (ck === key) score = 100;
+    else if (ck.startsWith(key)) score = 80;
+    else if (ck.includes(key)) score = 60;
+    else if ((l.drops || []).some((d) => String(d).toLowerCase().includes(lower))) score = 40;
+    else if (String(l.stageId || '').toLowerCase().includes(lower)) score = 20;
+    if (score) scored.push({ score, l });
+  }
+  scored.sort((a, b) => b.score - a.score || String(a.l.code).localeCompare(String(b.l.code)));
+  return scored.slice(0, 12).map((x) => x.l);
+}
 
 $('#btnDayMaa').addEventListener('click', () => openMaaPanel(selectedDate));
 
@@ -1561,11 +1618,26 @@ async function loadMaaPanel() {
     sel.appendChild(o);
   });
   sel.value = r.current;
+  await ensureMaaLevels(); // 关卡清单（失败不阻塞，只是关卡控件降级为文本提示）
   renderMaaTaskList(r.tasks);
 }
 
 function maaFieldHtml(t, f) {
   const key = esc(f.key);
+  if (f.widget === 'levels') {
+    const picked = String(f.value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+    const ph = maaLevels.length
+      ? '输入关卡代号或掉落物名（如 1-7 / 作战记录），回车确认'
+      : `关卡数据未载入${maaLevelsError ? '：' + maaLevelsError : ''}`;
+    return `<div class="maa-f maa-f-wide">
+      <span>${esc(f.label)}</span>
+      <div class="maa-levels" data-key="${key}" data-type="list" data-levels="${esc(picked.join(','))}">
+        <div class="ml-chips"></div>
+        <input type="text" class="ml-input" placeholder="${esc(ph)}" />
+        <div class="ml-suggest" hidden></div>
+      </div>
+    </div>`;
+  }
   if (f.type === 'bool') {
     return `<label class="maa-f maa-f-bool"><input type="checkbox" data-key="${key}" data-type="bool" ${f.value ? 'checked' : ''} /> ${esc(f.label)}</label>`;
   }
@@ -1602,7 +1674,84 @@ function renderMaaTaskList(tasks) {
       ${fieldsHtml ? `<div class="maa-fields">${fieldsHtml}</div>` : ''}`;
     const cb = card.querySelector('.maa-enable');
     cb.addEventListener('change', () => card.classList.toggle('on', cb.checked));
+    bindLevelsWidget(card);
     box.appendChild(card);
+  });
+}
+
+// 关卡选择控件：输入即搜索、回车自动修正、已选关卡按顺序执行
+function bindLevelsWidget(scope) {
+  scope.querySelectorAll('.maa-levels').forEach((box) => {
+    const input = box.querySelector('.ml-input');
+    const sug = box.querySelector('.ml-suggest');
+    const chips = box.querySelector('.ml-chips');
+    const getList = () => (box.dataset.levels || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const hideSuggest = () => { sug.hidden = true; sug.innerHTML = ''; };
+
+    function renderChips() {
+      const list = getList();
+      chips.innerHTML = list.length
+        ? list.map((c, i) => `<span class="ml-chip" title="第 ${i + 1} 个执行">${esc(c)}<b data-i="${i}">✕</b></span>`).join('')
+        : '<span class="ml-empty">还没有选择关卡</span>';
+      chips.querySelectorAll('.ml-chip b').forEach((b) => {
+        b.addEventListener('click', () => {
+          const arr = getList();
+          arr.splice(Number(b.dataset.i), 1);
+          box.dataset.levels = arr.join(',');
+          renderChips();
+        });
+      });
+    }
+
+    function add(code) {
+      const arr = getList();
+      if (!arr.includes(code)) arr.push(code);
+      box.dataset.levels = arr.join(',');
+      renderChips();
+      input.value = '';
+      hideSuggest();
+    }
+
+    function showSuggest(keyword) {
+      if (!maaLevels.length) { hideSuggest(); return; }
+      const hits = searchLevelsLocal(keyword);
+      if (!hits.length) {
+        sug.hidden = false;
+        sug.innerHTML = '<div class="ml-item muted">没有匹配的关卡</div>';
+        return;
+      }
+      sug.hidden = false;
+      sug.innerHTML = hits.map((l) => `<div class="ml-item" data-code="${esc(l.code)}">
+          <b>${esc(l.code)}</b>
+          <span class="ml-meta">${l.apCost ? l.apCost + ' 理智' : ''}${(l.drops || []).length ? ' · ' + esc((l.drops || []).slice(0, 3).join(' / ')) : ''}</span>
+        </div>`).join('');
+      sug.querySelectorAll('.ml-item[data-code]').forEach((it) => {
+        it.addEventListener('mousedown', (e) => { e.preventDefault(); add(it.dataset.code); });
+      });
+    }
+
+    input.addEventListener('input', () => showSuggest(input.value));
+    input.addEventListener('focus', () => showSuggest(input.value));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = input.value.trim();
+        if (!v) return;
+        const fixed = normalizeStageCodeLocal(v);
+        if (fixed) {
+          add(fixed);
+          if (fixed.toUpperCase().replace(/[\s\-_]/g, '') !== v.toUpperCase().replace(/[\s\-_]/g, '') && window.eve && window.eve.toast) {
+            window.eve.toast(`已修正为关卡「${fixed}」`);
+          }
+        } else {
+          showSuggest(v);
+        }
+      } else if (e.key === 'Escape') {
+        hideSuggest();
+      }
+    });
+    input.addEventListener('blur', () => setTimeout(hideSuggest, 200));
+    renderChips();
   });
 }
 
@@ -1616,6 +1765,10 @@ function collectMaaUpdates() {
       fields: {},
     };
     card.querySelectorAll('[data-key]').forEach((el) => {
+      if (el.classList.contains('maa-levels')) {
+        patch.fields[el.dataset.key] = (el.dataset.levels || '').split(',').map((s) => s.trim()).filter(Boolean);
+        return;
+      }
       patch.fields[el.dataset.key] = el.dataset.type === 'bool' ? el.checked : el.value;
     });
     updates.push({ index: Number(card.dataset.index), patch });

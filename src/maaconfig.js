@@ -22,7 +22,7 @@ const TASK_META = {
   Fight: {
     label: '刷理智',
     fields: [
-      { key: 'StagePlan', label: '关卡（每行一个，按顺序执行）', type: 'list' },
+      { key: 'StagePlan', label: '关卡（可搜索选择，按顺序执行）', type: 'list', widget: 'levels' },
       { key: 'UseMedicine', label: '自动吃理智药', type: 'bool' },
       { key: 'MedicineCount', label: '吃药数量（0 = 不限）', type: 'int', min: 0 },
       { key: 'UseStone', label: '自动碎石', type: 'bool' },
@@ -207,6 +207,7 @@ function buildEditableQueue(queue) {
       key: f.key,
       label: f.label,
       type: f.type,
+      widget: f.widget,
       min: f.min,
       options: f.options,
       value: toUiValue(f.type, t ? t[f.key] : undefined),
@@ -250,6 +251,55 @@ function suggestConfigName(date, existingNames) {
   return `${base}-${i}`;
 }
 
+// ---------- 关卡匹配（配合 MAA 的 stages.json）----------
+
+// 归一化写法：忽略大小写、空格、横线、下划线（"ce6"/"CE-6"/"ce 6" → "CE6"）
+function stageKey(s) {
+  return String(s == null ? '' : s).toUpperCase().replace(/[\s\-_]/g, '');
+}
+
+// 把用户输入修正为关卡清单里的标准代号；找不到返回 null
+function normalizeStageCode(input, levels) {
+  const raw = String(input == null ? '' : input).trim();
+  if (!raw) return null;
+  const list = Array.isArray(levels) ? levels : [];
+  const key = stageKey(raw);
+  if (!key) return null;
+  // 1) 完全一致（忽略分隔符与大小写）
+  let hit = list.find((l) => stageKey(l.code) === key);
+  if (hit) return hit.code;
+  // 2) 前缀一致（如输入 1-7 而清单里有 1-7）
+  hit = list.find((l) => stageKey(l.code) === key || stageKey(l.code).startsWith(key));
+  if (hit) return hit.code;
+  // 3) 去掉开头字母再试（如输入 "7" 匹配 "1-7" 的最后一段）
+  hit = list.find((l) => stageKey(l.code).endsWith(key));
+  if (hit) return hit.code;
+  return null;
+}
+
+// 搜索关卡：支持代号模糊匹配 + 掉落物名匹配，返回候选项（最多 limit 条）
+function searchLevels(keyword, levels, limit) {
+  const list = Array.isArray(levels) ? levels : [];
+  const max = Number.isFinite(limit) ? limit : 12;
+  const raw = String(keyword == null ? '' : keyword).trim();
+  if (!raw) return list.slice(0, max);
+  const key = stageKey(raw);
+  const lower = raw.toLowerCase();
+  const scored = [];
+  for (const l of list) {
+    const codeKey = stageKey(l.code);
+    let score = 0;
+    if (codeKey === key) score = 100;
+    else if (codeKey.startsWith(key)) score = 80;
+    else if (codeKey.includes(key)) score = 60;
+    else if ((l.drops || []).some((d) => String(d).toLowerCase().includes(lower))) score = 40;
+    else if ((l.stageId || '').toLowerCase().includes(lower)) score = 20;
+    if (score > 0) scored.push({ score, level: l });
+  }
+  scored.sort((a, b) => b.score - a.score || String(a.level.code).localeCompare(String(b.level.code)));
+  return scored.slice(0, max).map((x) => x.level);
+}
+
 module.exports = {
   TASK_META,
   taskLabel,
@@ -262,4 +312,7 @@ module.exports = {
   buildEditableQueue,
   applyTaskPatch,
   suggestConfigName,
+  stageKey,
+  normalizeStageCode,
+  searchLevels,
 };

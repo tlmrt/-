@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('api', {
   maaConfigOpenDir: () => ipcRenderer.invoke('maa:configOpenDir'),
   maaSetDateConfig: (date, name) => ipcRenderer.invoke('maa:setDateConfig', { date, name }),
   maaStartForDate: (date) => ipcRenderer.invoke('maa:startForDate', date),
+  maaLevels: (force) => ipcRenderer.invoke('maa:levels', force),
   onMaaEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('maa:event', handler);

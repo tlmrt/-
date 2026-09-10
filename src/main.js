@@ -1245,6 +1245,51 @@ ipcMain.handle('maa:configOpenDir', async () => {
   }
 });
 
+// ---- MAA 关卡清单（读 MAA 自带的 resource/stages.json，供"选关卡/自动修正"用） ----
+let maaLevelsCache = null;
+function loadMaaLevels(force) {
+  const mp = maaPrefsLocal();
+  if (!mp.exePath) return { ok: false, error: '尚未配置 MAA 可执行文件路径' };
+  const dir = path.dirname(mp.exePath);
+  const stagesFile = path.join(dir, 'resource', 'stages.json');
+  if (!fs.existsSync(stagesFile)) {
+    return { ok: false, error: '未找到 MAA 关卡数据：' + stagesFile };
+  }
+  if (maaLevelsCache && !force && maaLevelsCache.dir === dir) return { ok: true, ...maaLevelsCache };
+  try {
+    const stages = JSON.parse(fs.readFileSync(stagesFile, 'utf-8').replace(/^\uFEFF/, ''));
+    let itemMap = {};
+    try {
+      itemMap = JSON.parse(fs.readFileSync(path.join(dir, 'resource', 'item_index.json'), 'utf-8').replace(/^\uFEFF/, ''));
+    } catch (e) { /* 物品名表可选 */ }
+    const levels = (Array.isArray(stages) ? stages : []).map((s) => {
+      const drops = [];
+      for (const d of (s.dropInfos || [])) {
+        if (!/DROP/i.test(d.dropType || '')) continue;
+        const it = itemMap[d.itemId];
+        const name = it && it.name ? it.name : null;
+        if (name && !drops.includes(name)) drops.push(name);
+      }
+      return {
+        code: String(s.code || ''),
+        stageId: String(s.stageId || ''),
+        apCost: Number(s.apCost) || 0,
+        drops: drops.slice(0, 4),
+      };
+    }).filter((l) => l.code);
+    maaLevelsCache = { dir, at: Date.now(), levels };
+    console.log('[maa] 已载入关卡清单', levels.length, '个');
+    return { ok: true, ...maaLevelsCache };
+  } catch (e) {
+    return { ok: false, error: '关卡数据解析失败：' + (e && e.message ? e.message : e) };
+  }
+}
+
+ipcMain.handle('maa:levels', (e, force) => {
+  const r = loadMaaLevels(!!force);
+  return r.ok ? { ok: true, count: r.levels.length, levels: r.levels } : r;
+});
+
 ipcMain.handle('maa:pickExe', async () => {  if (!win) return { ok: false };
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: '选择 MAA 可执行文件（MAA.exe）',

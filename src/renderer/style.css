@@ -982,3 +982,57 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 }
 .maa-f textarea { resize: vertical; }
 .maa-f input[type="checkbox"] { accent-color: var(--primary); }
+
+/* 关卡选择控件 */
+.maa-levels { position: relative; }
+.ml-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; }
+.ml-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(var(--primary-rgb), .12);
+  color: var(--primary);
+  border-radius: 8px;
+  padding: 2px 6px 2px 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ml-chip b { cursor: pointer; font-weight: 700; opacity: .65; }
+.ml-chip b:hover { opacity: 1; }
+.ml-empty { font-size: 12px; color: var(--text-3); }
+.ml-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  outline: none;
+  background: #fff;
+  color: var(--text);
+}
+.ml-input:focus { border-color: var(--primary); }
+.ml-suggest {
+  position: absolute;
+  left: 0; right: 0; top: 100%;
+  z-index: 20;
+  margin-top: 3px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(16, 24, 40, .16);
+}
+.ml-suggest[hidden] { display: none; }
+.ml-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ml-item:hover { background: rgba(var(--primary-rgb), .08); }
+.ml-item b { color: var(--primary); min-width: 62px; }
+.ml-item .ml-meta { color: var(--text-3); font-size: 11.5px; }
+.ml-item.muted { color: var(--text-3); cursor: default; }
