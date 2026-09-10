@@ -19,9 +19,17 @@ const {
   yearsOf,
 } = require('./holidays');
 const { parseRelease, shouldNotify } = require('./updater');
+const http = require('http');
+const crypto = require('crypto');
+const { spawn, execFile } = require('child_process');
+const { matchRoute, checkToken, extractToken, parseQuery } = require('./localapi');
+const { renderArgs, normalizeMaaPrefs } = require('./maa');
 
 const APP_ID = 'cn.evestudio.calendar';
 app.setAppUserModelId(APP_ID);
+// 显示名改为「开源日历」，但内部名保持 evestudio-calendar 不变，
+// 以确保用户数据目录（%APPDATA%\evestudio-calendar）在改名前后一致、数据不丢
+app.setName('evestudio-calendar');
 
 // ---------------- 单实例锁 ----------------
 // 自启 + 手动打开不应同时跑两个进程（否则会双托盘、重复提醒）
@@ -202,7 +210,7 @@ function fireNotification(task, alert) {
 
   if (Notification.isSupported()) {
     const n = new Notification({
-      title: task.title || '日历提醒',
+      title: task.title || '开源日历',
       body: `${body}${prioTxt ? ' [' + prioTxt + ']' : ''}`,
       // 用自定义语音时不再播系统提示音，避免两种声音叠在一起
       silent: !prefs.notifySound || useCustom,
@@ -212,6 +220,13 @@ function fireNotification(task, alert) {
     n.show();
     console.log('[notify] fired', task.id, dayjs(alert.alertAt).format('YYYY-MM-DD HH:mm:ss'), task.title);
   }
+
+  // 推送到外部软件（若配置了 webhook）
+  notifyWebhook('reminder.fired', {
+    task: { id: task.id, title: task.title, date: task.date, time: task.time, priority: task.priority },
+    at: alert.alertAt,
+    atText: dayjs(alert.alertAt).format('YYYY-MM-DD HH:mm'),
+  });
 
   // 自定义提醒语音：播放自选音频 +（可选）系统 TTS 朗读任务标题
   if (useCustom || snd.speak) {
@@ -260,7 +275,7 @@ function showPopup(task, alert) {
     .tm{font-size:12px;color:#6b7280;padding-right:54px}.tl{font-size:17px;font-weight:700;color:#1f2430;margin-top:5px;word-break:break-all}.bd{font-size:13px;color:#4b5563;margin-top:7px;max-height:26px;overflow:hidden;text-overflow:ellipsis}
     .pr{position:absolute;right:12px;top:10px;font-size:11px;color:#fff;background:${prioClr};border-radius:20px;padding:2px 9px}
     </style></head><body>
-    <div class="tm">${t} · 日历提醒</div>
+    <div class="tm">${t} · 开源日历</div>
     <div class="tl">${esc(task.title)}</div>
     <div class="bd">${body}</div>
     <div class="pr">${prioTxt}</div>
@@ -275,7 +290,7 @@ function showPopup(task, alert) {
     alwaysOnTop: true,
     skipTaskbar: false,
     frame: true,
-    title: '日历提醒',
+    title: '开源日历',
     backgroundColor: '#ffffff',
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
@@ -301,9 +316,8 @@ function sanitizeTask(input) {
   return t;
 }
 
-ipcMain.handle('tasks:list', () => tasks.map((t) => ({ ...t })));
-
-ipcMain.handle('tasks:save', (e, input) => {
+// 共享的任务保存/删除逻辑（IPC 与本地 HTTP 接口都会用）
+function saveTaskInternal(input) {
   const t = sanitizeTask(input);
   if (!t.id) t.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   if (!t.reminders || !t.reminders.length) t.reminders = [{ id: 'r_' + Math.random().toString(36).slice(2, 6), offsetMinutes: 0 }];
@@ -320,14 +334,28 @@ ipcMain.handle('tasks:save', (e, input) => {
   }
   saveTasks();
   broadcastToWidgets('widget:update');
-  return { ok: true, task: { ...t } };
-});
+  return { ...t };
+}
 
-ipcMain.handle('tasks:delete', (e, id) => {
+function deleteTaskInternal(id) {
   tasks = tasks.filter((x) => x.id !== id);
   saveTasks();
   broadcastToWidgets('widget:update');
   return { ok: true };
+}
+
+ipcMain.handle('tasks:list', () => tasks.map((t) => ({ ...t })));
+
+ipcMain.handle('tasks:save', (e, input) => {
+  const t = saveTaskInternal(input);
+  notifyWebhook('task.saved', { task: { id: t.id, title: t.title, date: t.date, time: t.time } });
+  return { ok: true, task: { ...t } };
+});
+
+ipcMain.handle('tasks:delete', (e, id) => {
+  const r = deleteTaskInternal(id);
+  notifyWebhook('task.deleted', { id });
+  return r;
 });
 
 // ---------------- 节日与农历（计算逻辑在 festivals.js，可单测） ----------------
@@ -474,6 +502,12 @@ ipcMain.handle('holidays:openDir', async () => {
 const DEFAULT_UPDATE_PREFS = { autoCheck: true, repo: '', lastCheck: null, ignoredVersion: null };
 const updateState = { lastResult: null, downloadedFile: null, progress: 0, checking: false };
 
+// 外部联动：本地 HTTP 接口 + MAA 控制
+const DEFAULT_API_PREFS = { enabled: true, port: 8765, token: '', webhook: '' };
+const DEFAULT_MAA_PREFS = { exePath: '', argsTemplate: '', workDir: '', autoStartTask: '默认' };
+let apiServer = null;
+const maaState = { pid: null, startedAt: null };
+
 function updatePrefs() {
   const u = prefs.update && typeof prefs.update === 'object' ? prefs.update : {};
   return {
@@ -615,6 +649,343 @@ ipcMain.handle('update:openPage', async () => {
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) };
   }
+});
+
+// ---------------- 外部联动：本地 HTTP 接口 + MAA ----------------
+function apiPrefs() {
+  const a = prefs.api && typeof prefs.api === 'object' ? prefs.api : {};
+  return {
+    enabled: a.enabled !== false,
+    port: Number(a.port) > 0 && Number(a.port) < 65536 ? Number(a.port) : 8765,
+    token: typeof a.token === 'string' ? a.token : '',
+    webhook: typeof a.webhook === 'string' ? a.webhook.trim() : '',
+  };
+}
+
+function maaPrefsLocal() {
+  return normalizeMaaPrefs(prefs.maa);
+}
+
+function newToken() {
+  return crypto.randomBytes(12).toString('hex');
+}
+
+// 事件推送到 webhook（外部软件可订阅）
+async function notifyWebhook(event, payload) {
+  const url = apiPrefs().webhook;
+  if (!url) return { ok: false, error: '未配置 webhook' };
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app: '开源日历', event, time: Date.now(), payload }),
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error('[webhook] 推送失败', e && e.message);
+    return { ok: false, error: String(e && e.message) };
+  }
+}
+
+// ---- MAA 控制 ----
+function maaStart(taskName) {
+  const mp = maaPrefsLocal();
+  if (!mp.exePath || !fs.existsSync(mp.exePath)) {
+    return { ok: false, error: '尚未配置 MAA 可执行文件路径（设置 → 外部联动）' };
+  }
+  const now = dayjs();
+  const task = taskName || mp.autoStartTask || '默认';
+  const args = renderArgs(mp.argsTemplate, {
+    task,
+    date: now.format('YYYY-MM-DD'),
+    time: now.format('HH:mm'),
+    title: task,
+    id: '',
+  });
+  try {
+    const child = spawn(mp.exePath, args, {
+      detached: true,
+      stdio: 'ignore',
+      cwd: mp.workDir && fs.existsSync(mp.workDir) ? mp.workDir : path.dirname(mp.exePath),
+    });
+    child.unref();
+    maaState.pid = child.pid;
+    maaState.startedAt = Date.now();
+    notifyWebhook('maa.started', { pid: child.pid, task, args });
+    return { ok: true, pid: child.pid, task, args };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+function maaStop() {
+  const pid = maaState.pid;
+  if (!pid) return { ok: false, error: 'MAA 未由本应用启动（或已经停止）' };
+  try {
+    execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
+    maaState.pid = null;
+    maaState.startedAt = null;
+    notifyWebhook('maa.stopped', { pid });
+    return { ok: true, pid };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+function maaStatus() {
+  let running = false;
+  if (maaState.pid) {
+    try {
+      process.kill(maaState.pid, 0);
+      running = true;
+    } catch (e) {
+      running = false;
+      maaState.pid = null;
+    }
+  }
+  const mp = maaPrefsLocal();
+  return {
+    ok: true,
+    running,
+    pid: running ? maaState.pid : null,
+    startedAt: running ? maaState.startedAt : null,
+    configured: !!(mp.exePath && fs.existsSync(mp.exePath)),
+    exePath: mp.exePath,
+    argsTemplate: mp.argsTemplate,
+    autoStartTask: mp.autoStartTask,
+  };
+}
+
+// ---- 接口路由处理 ----
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > 1024 * 1024) { resolve(null); req.destroy(); return; }
+      data += chunk;
+    });
+    req.on('end', () => {
+      if (!data) return resolve({});
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+async function handleApiRoute(route, { query, body }) {
+  const ok = (b) => ({ status: 200, body: { ok: true, ...b } });
+  const bad = (msg, status) => ({ status: status || 400, body: { ok: false, error: msg } });
+
+  switch (route.name) {
+    case 'ping':
+      return ok({ name: '开源日历', version: app.getVersion(), port: apiPrefs().port });
+
+    case 'tasks.list': {
+      const date = query.date;
+      const list = date ? tasks.filter((t) => taskOccursOnDate(t, date)) : tasks;
+      return ok({ count: list.length, tasks: list.map((t) => ({ ...t, _notifiedKeys: undefined })) });
+    }
+    case 'tasks.get': {
+      const t = tasks.find((x) => x.id === route.params[0]);
+      return t ? ok({ task: { ...t, _notifiedKeys: undefined } }) : bad('任务不存在', 404);
+    }
+    case 'tasks.create':
+    case 'tasks.update': {
+      const input = route.name === 'tasks.update' ? { ...(body || {}), id: body && body.id ? body.id : route.params[0] } : body;
+      if (!input || typeof input !== 'object' || !input.title) return bad('缺少 title');
+      const saved = saveTaskInternal(input);
+      notifyWebhook('task.saved', { task: { id: saved.id, title: saved.title, date: saved.date, time: saved.time } });
+      return ok({ task: { ...saved, _notifiedKeys: undefined } });
+    }
+    case 'tasks.delete': {
+      const id = route.params[0];
+      const existed = tasks.some((x) => x.id === id);
+      if (!existed) return bad('任务不存在', 404);
+      deleteTaskInternal(id);
+      notifyWebhook('task.deleted', { id });
+      return ok({ id });
+    }
+
+    case 'segments.list': {
+      const date = query.date;
+      const list = date ? segments.filter((s) => s.date === date) : segments;
+      return ok({ count: list.length, segments: list });
+    }
+    case 'segments.create': {
+      const input = body || {};
+      if (!input.date || !input.start || !input.end) return bad('缺少 date/start/end');
+      const item = {
+        id: input.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
+        date: String(input.date),
+        start: String(input.start),
+        end: String(input.end),
+        title: String(input.title || ''),
+        color: String(input.color || '#4f6bff'),
+      };
+      const idx = segments.findIndex((s) => s.id === item.id);
+      if (idx >= 0) segments[idx] = item; else segments.push(item);
+      saveSegments();
+      broadcastToWidgets('widget:update');
+      notifyWebhook('segment.saved', { segment: item });
+      return ok({ segment: item });
+    }
+
+    case 'now': {
+      const now = Date.now();
+      const today = dayjs().format('YYYY-MM-DD');
+      const todays = tasks.filter((t) => taskOccursOnDate(t, today));
+      const todaysSeg = segments.filter((s) => s.date === today);
+      let next = null;
+      try {
+        const horizon = now + 24 * 60 * 60 * 1000;
+        for (const t of tasks) {
+          for (const a of computeAlertsInWindow(t, now, horizon)) {
+            if (!next || a.alertAt < next.at) next = { at: a.alertAt, taskId: t.id, title: t.title, time: dayjs(a.alertAt).format('YYYY-MM-DD HH:mm') };
+          }
+        }
+      } catch (e) { /* 忽略 */ }
+      const active = segments.find((s) => {
+        const start = dayjs(`${s.date}T${s.start}`).valueOf();
+        let end = dayjs(`${s.date}T${s.end}`).valueOf();
+        if (end <= start) end += 24 * 60 * 60 * 1000;
+        return now >= start && now < end;
+      });
+      return ok({
+        now: dayjs(now).format('YYYY-MM-DD HH:mm:ss'),
+        today,
+        tasks: todays.map((t) => ({ id: t.id, title: t.title, time: t.time, priority: t.priority })),
+        segments: todaysSeg,
+        activeSegment: active || null,
+        nextReminder: next,
+      });
+    }
+
+    case 'maa.start':
+      return maaStart(body && body.task);
+    case 'maa.stop':
+      return maaStop();
+    case 'maa.status':
+      return maaStatus();
+
+    case 'webhook.test': {
+      const r = await notifyWebhook('test', { message: '这是来自开源日历的测试事件' });
+      return r.ok ? ok({ sent: true }) : bad(r.error || '推送失败');
+    }
+    default:
+      return bad('未知接口', 404);
+  }
+}
+
+function startApiServer() {
+  stopApiServer();
+  const ap = apiPrefs();
+  if (!ap.enabled) return { ok: true, running: false };
+  apiServer = http.createServer(async (req, res) => {
+    const json = (code, obj) => {
+      const body = JSON.stringify(obj);
+      res.writeHead(code, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(body),
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Token, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      });
+      res.end(body);
+    };
+    try {
+      if (req.method === 'OPTIONS') return json(204, {});
+      const url = req.url || '/';
+      const query = parseQuery(url);
+      const route = matchRoute(req.method, url);
+      if (!route) return json(404, { ok: false, error: '未知接口' });
+      if (route.auth) {
+        const token = extractToken(req.headers, query);
+        if (!checkToken(token, ap.token)) {
+          return json(401, { ok: false, error: 'token 无效（请在 X-Api-Token 头或 ?token= 中带上设置里的令牌）' });
+        }
+      }
+      const body = await readBody(req);
+      const result = await handleApiRoute(route, { query, body });
+      json(result.status || 200, result.body);
+    } catch (e) {
+      json(500, { ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  });
+  apiServer.on('error', (e) => {
+    console.error('[api] 服务错误：', e && e.message);
+    apiServer = null;
+  });
+  apiServer.listen(ap.port, '127.0.0.1', () => {
+    console.log(`[api] 本地联动接口已启动：http://127.0.0.1:${ap.port}`);
+  });
+  return { ok: true, running: true, port: ap.port };
+}
+
+function stopApiServer() {
+  if (apiServer) {
+    try { apiServer.close(); } catch (e) { /* noop */ }
+    apiServer = null;
+  }
+}
+
+ipcMain.handle('api:status', () => ({
+  ...apiPrefs(),
+  running: !!apiServer,
+  url: `http://127.0.0.1:${apiPrefs().port}`,
+}));
+
+ipcMain.handle('api:setPrefs', (e, patch) => {
+  prefs.api = { ...apiPrefs(), ...(patch || {}) };
+  savePrefs();
+  startApiServer();
+  return { ok: true, status: { ...apiPrefs(), running: !!apiServer } };
+});
+
+ipcMain.handle('api:regenerateToken', () => {
+  prefs.api = { ...apiPrefs(), token: newToken() };
+  savePrefs();
+  startApiServer();
+  return { ok: true, token: prefs.api.token };
+});
+
+ipcMain.handle('api:openDocs', async () => {
+  try {
+    const src = path.join(__dirname, '..', 'docs', 'API.md');
+    if (!fs.existsSync(src)) return { ok: false, error: '接口文档缺失' };
+    const dst = path.join(DATA_DIR(), '接口文档.md');
+    fs.copyFileSync(src, dst);
+    await shell.openPath(dst);
+    return { ok: true, file: dst };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+
+ipcMain.handle('maa:status', () => maaStatus());
+ipcMain.handle('maa:start', (e, taskName) => maaStart(taskName));
+ipcMain.handle('maa:stop', () => maaStop());
+ipcMain.handle('maa:setPrefs', (e, patch) => {
+  prefs.maa = { ...maaPrefsLocal(), ...(patch || {}) };
+  savePrefs();
+  return { ok: true, prefs: maaPrefsLocal() };
+});
+ipcMain.handle('maa:pickExe', async () => {
+  if (!win) return { ok: false };
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: '选择 MAA 可执行文件（MAA.exe）',
+    properties: ['openFile'],
+    filters: [{ name: '可执行文件', extensions: ['exe'] }],
+  });
+  if (canceled || !filePaths.length) return { ok: false };
+  prefs.maa = { ...maaPrefsLocal(), exePath: filePaths[0], workDir: path.dirname(filePaths[0]) };
+  savePrefs();
+  return { ok: true, prefs: maaPrefsLocal() };
 });
 
 // ---------------- 独立时间段 ----------------
@@ -1008,7 +1379,7 @@ function createWindow(showOnReady = true) {
     height: 860,
     minWidth: 980,
     minHeight: 640,
-    title: '日历提醒',
+    title: '开源日历',
     icon: iconPath(),
     backgroundColor: '#f5f7fb',
     show: false,
@@ -1063,7 +1434,7 @@ function createTray() {
     image = nativeImage.createEmpty();
   }
   tray = new Tray(image);
-  tray.setToolTip('日历提醒');
+  tray.setToolTip('开源日历');
   const menu = Menu.buildFromTemplate([
     { label: '打开日历', click: () => ensureWindow() },
     { type: 'separator' },
@@ -1205,6 +1576,9 @@ app.whenReady().then(() => {
   if (!prefs.alertSound || typeof prefs.alertSound !== 'object') prefs.alertSound = { ...DEFAULT_SOUND_PREFS };
   if (!prefs.holidays || typeof prefs.holidays !== 'object') prefs.holidays = { ...DEFAULT_HOLIDAY_PREFS };
   if (!prefs.update || typeof prefs.update !== 'object') prefs.update = { ...DEFAULT_UPDATE_PREFS };
+  if (!prefs.api || typeof prefs.api !== 'object') prefs.api = { ...DEFAULT_API_PREFS };
+  if (!prefs.api.token) { prefs.api.token = newToken(); savePrefs(); }
+  if (!prefs.maa || typeof prefs.maa !== 'object') prefs.maa = { ...DEFAULT_MAA_PREFS };
   loadHolidays(); // 载入休息日 / 调休数据
   if (!prefs.festivals || typeof prefs.festivals !== 'object') prefs.festivals = { ...DEFAULT_FESTIVAL_PREFS };
   if (!Array.isArray(prefs.festivals.countries) || !prefs.festivals.countries.length) prefs.festivals.countries = ['cn'];
@@ -1226,6 +1600,8 @@ app.whenReady().then(() => {
   setInterval(tick, 10 * 1000);
   tick(); // 立即跑一次（含启动补发）
 
+  startApiServer(); // 启动本地联动接口（可在设置里关闭）
+
   // 自动检查更新：启动 12 秒后一次，之后每 6 小时一次；失败仅记录日志，不影响使用
   setTimeout(() => {
     if (updatePrefs().autoCheck) checkForUpdates({}).catch(() => {});
@@ -1243,6 +1619,9 @@ app.on('window-all-closed', () => {
   // 托盘常驻：不退出
 });
 
-app.on('before-quit', () => { isQuitting = true; });
+app.on('before-quit', () => {
+  isQuitting = true;
+  stopApiServer();
+});
 
 } // 单实例锁 else 块结束

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' file:; img-src 'self' data: file:; media-src 'self' data: file:" />
-  <title>日历提醒</title>
+  <title>开源日历</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -13,8 +13,8 @@
     <header class="topbar">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span class="brand-name">EveCalendar</span>
-        <span class="brand-sub">日历提醒</span>
+        <span class="brand-name">开源日历</span>
+        <span class="brand-sub">EveCalendar</span>
       </div>
       <div class="nav">
         <button class="icon-btn" id="btnToday" title="回到今天">今天</button>
@@ -194,6 +194,44 @@
             <button type="button" class="ghost-btn small" id="btnHoliDir">打开数据目录…</button>
           </div>
           <p class="hint">放假安排每年由官方发布（含调休），无法自动推算，所以需要「在线更新」：从公开数据集 holiday-cn 下载去年 / 今年 / 明年的安排并保存到本机。网络不通时可先手动下载 JSON，再用「导入 JSON…」。</p>
+        </div>
+        <div class="field">
+          <label>外部联动（本地接口 / MAA）</label>
+          <label class="inline-check"><input type="checkbox" id="sApiEnabled" /> 开启本地 HTTP 接口（仅本机 127.0.0.1）</label>
+          <div class="theme-custom">
+            <span class="opacity-label">端口</span>
+            <input type="number" id="apiPort" min="1024" max="65535" style="width:90px" />
+            <button type="button" class="ghost-btn small" id="btnApiSave">保存并重启接口</button>
+            <button type="button" class="ghost-btn small" id="btnApiDocs">接口文档</button>
+          </div>
+          <div class="api-token-row">
+            <span class="opacity-label">令牌</span>
+            <code id="apiToken">—</code>
+            <button type="button" class="ghost-btn small" id="btnApiCopyToken">复制</button>
+            <button type="button" class="ghost-btn small" id="btnApiNewToken">重新生成</button>
+          </div>
+          <div class="holi-status" id="apiStatus">接口状态读取中…</div>
+          <div class="theme-custom">
+            <input type="text" id="apiWebhook" placeholder="事件推送地址（webhook，可选）" />
+            <button type="button" class="ghost-btn small" id="btnApiSaveWebhook">保存</button>
+          </div>
+          <div class="maapart">
+            <div class="theme-custom">
+              <input type="text" id="maaExe" placeholder="MAA 可执行文件路径（MAA.exe）" readonly />
+              <button type="button" class="ghost-btn small" id="btnMaaPick">选择…</button>
+            </div>
+            <div class="theme-custom" style="margin-top:6px">
+              <input type="text" id="maaArgs" placeholder="启动参数模板，如 --task {task}" />
+              <input type="text" id="maaTask" placeholder="默认任务名" style="max-width:120px" />
+              <button type="button" class="ghost-btn small" id="btnMaaSave">保存</button>
+            </div>
+            <div class="theme-custom" style="margin-top:6px">
+              <button type="button" class="primary-btn small" id="btnMaaStart">启动 MAA</button>
+              <button type="button" class="ghost-btn small" id="btnMaaStop">停止 MAA</button>
+              <span class="holi-status" id="maaStatus" style="margin:0">MAA 状态未知</span>
+            </div>
+          </div>
+          <p class="hint">接口地址如 http://127.0.0.1:8765/api/now ，请求需带令牌（头 X-Api-Token 或 ?token=）。其它软件可通过接口读取任务、创建任务、控制 MAA 启动/停止；配置 webhook 后，任务到点等事件会 POST 给你指定的地址。接口只监听本机，不影响日历正常使用。</p>
         </div>
         <div class="field">
           <label>应用更新（直连 GitHub 仓库）</label>

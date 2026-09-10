@@ -1164,6 +1164,8 @@ $('#btnSettings').addEventListener('click', async () => {
   updateBgBtns();
   updateSoundUI();
   await updateHolidayUI();
+  await updateApiUI();
+  await updateMaaUI();
   await updateUpdateUI();
   await renderFestivalUI();
   await renderPluginList();
@@ -1327,6 +1329,96 @@ $('#btnHoliImport').addEventListener('click', async () => {
 
 $('#btnHoliDir').addEventListener('click', async () => {
   try { await window.api.openHolidayDir(); } catch (e) { alert('无法打开数据目录'); }
+});
+
+// ---------- 外部联动（本地接口 / MAA） ----------
+async function updateApiUI() {
+  try {
+    const st = await window.api.apiStatus();
+    $('#sApiEnabled').checked = st.enabled !== false;
+    if (document.activeElement !== $('#apiPort')) $('#apiPort').value = st.port;
+    $('#apiToken').textContent = st.token || '—';
+    $('#apiToken').title = st.token || '';
+    if (document.activeElement !== $('#apiWebhook')) $('#apiWebhook').value = st.webhook || '';
+    $('#apiStatus').textContent = st.enabled === false
+      ? '接口已关闭'
+      : (st.running ? `运行中：${st.url}（仅本机可访问）` : `未运行（端口 ${st.port} 可能被占用）`);
+  } catch (e) {
+    $('#apiStatus').textContent = '接口状态读取失败';
+  }
+}
+
+async function updateMaaUI() {
+  try {
+    const st = await window.api.maaStatus();
+    if (document.activeElement !== $('#maaExe')) $('#maaExe').value = st.exePath || '';
+    if (document.activeElement !== $('#maaArgs')) $('#maaArgs').value = st.argsTemplate || '';
+    if (document.activeElement !== $('#maaTask')) $('#maaTask').value = st.autoStartTask || '默认';
+    $('#maaStatus').textContent = st.running
+      ? `MAA 运行中（PID ${st.pid}）`
+      : (st.configured ? 'MAA 未运行' : '尚未配置 MAA 路径');
+  } catch (e) {
+    $('#maaStatus').textContent = 'MAA 状态读取失败';
+  }
+}
+
+$('#sApiEnabled').addEventListener('change', async (e) => {
+  await window.api.apiSetPrefs({ enabled: e.target.checked });
+  await updateApiUI();
+});
+$('#btnApiSave').addEventListener('click', async () => {
+  const port = Number($('#apiPort').value);
+  if (!(port > 1024 && port < 65536)) { alert('端口需在 1025 – 65535 之间'); return; }
+  await window.api.apiSetPrefs({ port });
+  await updateApiUI();
+  alert('已保存并重启接口');
+});
+$('#btnApiDocs').addEventListener('click', async () => {
+  const r = await window.api.apiOpenDocs();
+  if (!r || !r.ok) alert('打开接口文档失败：' + ((r && r.error) || '未知错误'));
+});
+$('#btnApiCopyToken').addEventListener('click', async () => {
+  const t = $('#apiToken').textContent;
+  if (!t || t === '—') return;
+  try {
+    await navigator.clipboard.writeText(t);
+    alert('令牌已复制到剪贴板');
+  } catch (e) {
+    alert('复制失败，请手动选中复制');
+  }
+});
+$('#btnApiNewToken').addEventListener('click', async () => {
+  if (!confirm('重新生成令牌后，之前使用旧令牌的软件需要更新配置，确定继续？')) return;
+  await window.api.apiRegenerateToken();
+  await updateApiUI();
+});
+$('#btnApiSaveWebhook').addEventListener('click', async () => {
+  await window.api.apiSetPrefs({ webhook: $('#apiWebhook').value.trim() });
+  await updateApiUI();
+  alert('已保存 webhook 地址');
+});
+
+$('#btnMaaPick').addEventListener('click', async () => {
+  const r = await window.api.maaPickExe();
+  if (r && r.ok) await updateMaaUI();
+});
+$('#btnMaaSave').addEventListener('click', async () => {
+  await window.api.maaSetPrefs({
+    argsTemplate: $('#maaArgs').value,
+    autoStartTask: $('#maaTask').value.trim() || '默认',
+  });
+  await updateMaaUI();
+  alert('MAA 设置已保存');
+});
+$('#btnMaaStart').addEventListener('click', async () => {
+  const r = await window.api.maaStart($('#maaTask').value.trim() || undefined);
+  await updateMaaUI();
+  if (!r || !r.ok) alert('启动 MAA 失败：' + ((r && r.error) || '未知错误'));
+});
+$('#btnMaaStop').addEventListener('click', async () => {
+  const r = await window.api.maaStop();
+  await updateMaaUI();
+  if (!r || !r.ok) alert('停止 MAA 失败：' + ((r && r.error) || '未知错误'));
 });
 
 // ---------- 应用更新 ----------

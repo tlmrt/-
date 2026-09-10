@@ -38,6 +38,17 @@ contextBridge.exposeInMainWorld('api', {
   createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
   openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),
 
+  // ---- 外部联动：本地 HTTP 接口 + MAA ----
+  apiStatus: () => ipcRenderer.invoke('api:status'),
+  apiSetPrefs: (patch) => ipcRenderer.invoke('api:setPrefs', patch),
+  apiRegenerateToken: () => ipcRenderer.invoke('api:regenerateToken'),
+  apiOpenDocs: () => ipcRenderer.invoke('api:openDocs'),
+  maaStatus: () => ipcRenderer.invoke('maa:status'),
+  maaSetPrefs: (patch) => ipcRenderer.invoke('maa:setPrefs', patch),
+  maaPickExe: () => ipcRenderer.invoke('maa:pickExe'),
+  maaStart: (task) => ipcRenderer.invoke('maa:start', task),
+  maaStop: () => ipcRenderer.invoke('maa:stop'),
+
   // ---- 应用更新（直连 GitHub 仓库） ----
   updateStatus: () => ipcRenderer.invoke('update:status'),
   checkUpdate: () => ipcRenderer.invoke('update:check'),

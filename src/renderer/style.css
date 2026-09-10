@@ -867,3 +867,20 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 .ut-head b { color: var(--primary); }
 .ut-body { font-size: 12.5px; color: var(--text-2); line-height: 1.6; margin-bottom: 10px; max-height: 72px; overflow: auto; }
 .ut-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---------- 外部联动 ---------- */
+.api-token-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.api-token-row code {
+  flex: 1;
+  min-width: 0;
+  background: #f2f4fb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.maapart { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.maapart .holi-status { display: inline-block; }
