@@ -1,9 +1,31 @@
-# 开源日历（EveCalendar）
+<p align="center">
+  <img src="assets/banner.svg" alt="开源日历 — 本地日历 · 任务提醒 · MAA 联动" width="100%">
+</p>
 
-> Windows 桌面日历应用：在日历上按日期与时间安排任务，到点通过 **Windows 系统通知**提醒你。
-> 开源（MIT）· 可扩展（插件口）· 可联动（本地 HTTP API / MAA）· 全本地存储（隐私友好）
+<p align="center">
+  <a href="https://github.com/tlmrt/-/releases/latest"><img src="https://img.shields.io/github/v/release/tlmrt/-?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=4F6BFF" alt="最新版本"></a>
+  <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%20%2F%2011-4F6BFF" alt="支持平台">
+  <img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF-MIT-36B37E" alt="开源许可">
+  <a href="https://github.com/tlmrt/-/releases/latest"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E5%AE%89%E8%A3%85%E5%8C%85-8B5CF6" alt="下载"></a>
+</p>
+
+<h1 align="center">开源日历（EveCalendar）</h1>
+
+<p align="center">
+  Windows 桌面日历应用：在日历上按日期与时间安排任务，到点通过系统通知提醒你。<br>
+  开源（MIT）· 可扩展（插件口）· 可联动（本地 HTTP API / MAA）· 全本地存储（隐私友好）
+</p>
 
 在日历上为每一天安排带具体时间的任务，到点自动弹系统通知；窗口最小化或藏在托盘也照常计时。UI 高度可定制：强调色/背景色、背景图片/图片幻灯片/视频背景、面板透明度，鼠标移出面板还能全屏看背景。
+
+## 🚀 快速开始
+
+1. 到 **[Releases](https://github.com/tlmrt/-/releases/latest)** 下载：
+   - `开源日历 Setup x.y.z.exe` —— **安装版（推荐）**，自动创建桌面 / 开始菜单快捷方式
+   - 便携版 —— 免安装，双击即用
+2. 运行即可使用，**无需注册、无需联网**；数据全部保存在本机 `%APPDATA%\evestudio-calendar\`
+3. 首次运行若 Windows 提示"已保护你的电脑"，点「更多信息 → 仍要运行」（暂未做代码签名）
+4. **MAA 用户**：到「⚙ 设置 → 外部联动」点「**自动搜索 MAA**」一键定位路径，然后点日历右侧的 **🎮** 配置"一键长草"式任务队列
 
 ## ✨ 功能一览
 
@@ -130,11 +152,37 @@ npm run dist       # 打包 Windows 安装包(NSIS) + 便携版 → release/
 
 ```
 evestudio-calendar/
-├─ src/                核心代码
-├─ extras/demo-plugin/ 示例插件模板
-├─ test/               单测
-├─ assets/             图标
+├─ src/
+│  ├─ main.js           主进程：窗口 / 托盘 / 提醒调度 / 存储 / MAA / 本地接口 / 更新
+│  ├─ preload.js        contextBridge 安全桥
+│  ├─ reminder.js       提醒引擎（纯逻辑，含单测）
+│  ├─ festivals.js      节日与农历（纯逻辑，含单测）
+│  ├─ festivals-data.js 6 个国家/地区节日规则
+│  ├─ holidays.js       节假日数据解析（纯逻辑，含单测）
+│  ├─ updater.js        GitHub 更新检查与 Release 解析（纯逻辑，含单测）
+│  ├─ maa.js            MAA 参数模板与配置归一化（纯逻辑，含单测）
+│  ├─ maaconfig.js      MAA 任务队列模型（一键长草字段映射，含单测）
+│  ├─ localapi.js       本地 HTTP 接口路由与鉴权（纯逻辑，含单测）
+│  └─ renderer/         渲染层（原生 HTML/CSS/JS）
+│     ├─ index.html / style.css / app.js
+│     └─ widget.html / widget.css / widget.js   桌面小组件
+├─ docs/
+│  ├─ API.md            本地联动接口文档（MAA 联动示例）
+│  └─ PLUGIN_GUIDE.md   插件开发教程
+├─ extras/
+│  ├─ demo-hello.js     单文件插件示例
+│  └─ demo-plugin/      文件夹插件示例
+├─ test/                单元测试（234 项，npm test 一键运行）
+├─ assets/              图标 / 横幅 / 赞助码
+├─ RELEASE_NOTES.md     版本发布说明
+├─ push-to-github.ps1   推送脚本（绕过本机 git 镜像重写）
 ├─ package.json / .npmrc
 ├─ LICENSE (MIT)
 └─ README.md
+```
+
+## 🧪 测试
+
+```bash
+npm test   # 234 项单测：提醒引擎 / 节日农历 / 节假日 / 更新 / MAA / 本地接口
 ```
