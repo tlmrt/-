@@ -221,8 +221,10 @@
           <div class="maapart">
             <div class="theme-custom">
               <input type="text" id="maaExe" placeholder="MAA 可执行文件路径（MAA.exe）" readonly />
-              <button type="button" class="ghost-btn small" id="btnMaaPick">选择…</button>
+              <button type="button" class="ghost-btn small" id="btnMaaAutoDetect">自动搜索 MAA</button>
+              <button type="button" class="ghost-btn small" id="btnMaaPick">手动选择…</button>
             </div>
+            <div id="maaDetectResults" class="detect-list" hidden></div>
             <div class="theme-custom" style="margin-top:6px">
               <input type="text" id="maaArgs" placeholder="启动参数模板，如 --task {task}" />
               <input type="text" id="maaTask" placeholder="默认任务名" style="max-width:120px" />
@@ -433,8 +435,10 @@
         <div class="theme-custom">
           <button type="button" class="primary-btn small" id="btnMaaDailyStartNow">立即按此设置启动一次</button>
           <button type="button" class="ghost-btn small" id="btnMaaDailyCheck">检查是否该启动</button>
+          <button type="button" class="ghost-btn small" id="btnMaaAutoDetectGlobal">自动搜索 MAA</button>
           <button type="button" class="ghost-btn small" id="btnMaaGlobalOpenPanel">打开 MAA 任务面板</button>
         </div>
+        <div id="maaDetectResultsGlobal" class="detect-list" hidden></div>
         <p class="hint">提示：任务里加了「🎮 启动 MAA」提醒的话，到点也会启动 MAA；两者都开启时，MAA 已在运行会自动跳过重复启动。</p>
       </div>
       <div class="modal-foot">

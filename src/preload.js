@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   maaStatus: () => ipcRenderer.invoke('maa:status'),
   maaSetPrefs: (patch) => ipcRenderer.invoke('maa:setPrefs', patch),
   maaPickExe: () => ipcRenderer.invoke('maa:pickExe'),
+  maaAutoDetect: () => ipcRenderer.invoke('maa:autoDetect'),
   maaStart: (task) => ipcRenderer.invoke('maa:start', task),
   maaStop: () => ipcRenderer.invoke('maa:stop'),
   maaRunTask: (taskId) => ipcRenderer.invoke('maa:runTask', taskId),

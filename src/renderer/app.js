@@ -1952,6 +1952,60 @@ $('#btnMaaPanelStop').addEventListener('click', async () => {
   await updateMaaUI();
 });
 
+// ---------- 自动搜索电脑上的 MAA ----------
+async function detectMaa(scope) {
+  const btn = scope === 'global' ? $('#btnMaaAutoDetectGlobal') : $('#btnMaaAutoDetect');
+  const box = scope === 'global' ? $('#maaDetectResultsGlobal') : $('#maaDetectResults');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '搜索中…';
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  try {
+    const r = await window.api.maaAutoDetect();
+    if (!r || !r.ok) { alert('搜索失败：' + ((r && r.error) || '未知错误')); return; }
+    if (!r.count) {
+      alert('没有在电脑上找到 MAA.exe。\n可以点「手动选择…」指定路径，或先运行一次 MAA 再搜索。');
+      return;
+    }
+    renderDetectResults(r.results, box);
+    if (r.count === 1) await applyMaaCandidate(r.results[0]);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+function renderDetectResults(list, box) {
+  if (!box) return;
+  box.innerHTML = `<div class="hint" style="margin-bottom:4px">找到 ${list.length} 个 MAA，点「使用」即可设为当前 MAA：</div>`
+    + list.map((c, i) => `<div class="detect-item">
+        <div class="detect-meta"><b>${esc(c.version || 'MAA')}</b>
+          <span class="detect-path" title="${esc(c.exePath)}">${esc(c.exePath)}</span></div>
+        <button type="button" class="primary-btn small" data-i="${i}">使用</button>
+      </div>`).join('');
+  box.hidden = false;
+  box.querySelectorAll('button[data-i]').forEach((b) => {
+    b.addEventListener('click', () => applyMaaCandidate(list[Number(b.dataset.i)]));
+  });
+}
+
+async function applyMaaCandidate(c) {
+  if (!c) return;
+  await window.api.maaSetPrefs({ exePath: c.exePath, workDir: c.dir });
+  await updateMaaUI();
+  for (const id of ['#maaDetectResults', '#maaDetectResultsGlobal']) {
+    const box = $(id);
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+  }
+  await renderMaaGlobal();
+  if (window.eve && window.eve.toast) {
+    window.eve.toast(`已设置 MAA：${c.exePath}${c.version ? '（' + c.version + '）' : ''}`, 4000);
+  }
+}
+
+$('#btnMaaAutoDetect').addEventListener('click', () => detectMaa('settings'));
+$('#btnMaaAutoDetectGlobal').addEventListener('click', () => detectMaa('global'));
+
 // ---------- MAA 全局设置（每天定时自动启动） ----------
 async function renderMaaGlobal() {
   $('#maaGlobalMsg').textContent = '';
@@ -1983,7 +2037,7 @@ async function renderMaaGlobal() {
   const boundDays = Object.keys(d.dateConfigs || {}).length;
   const last = g.lastRunDate ? `上次自动启动：${g.lastRunDate}` : '尚未自动启动过';
   $('#maaGlobalStatus').textContent =
-    `MAA ${d.maaConfigured ? '路径已配置' : '未配置路径'} · 默认任务名「${d.autoStartTask}」 · ${d.skipIfRunning ? '已在运行则跳过' : '不跳过已运行'} · ${last}`
+    `MAA ${d.maaConfigured ? '已找到：' + (d.exePath || '') : '未配置路径（可点「自动搜索 MAA」）'} · 默认任务名「${d.autoStartTask}」 · ${d.skipIfRunning ? '已在运行则跳过' : '不跳过已运行'} · ${last}`
     + (boundDays ? ` · 已有 ${boundDays} 天绑定专属配置（优先级更高）` : '')
     + (d.configError ? ` · 配置读取：${d.configError}` : '');
 }

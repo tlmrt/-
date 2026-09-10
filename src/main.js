@@ -1278,6 +1278,94 @@ ipcMain.handle('maa:configSetCurrent', (e, name) => {
   return { ok: true, current: name };
 });
 
+// ---- 自动搜索电脑上的 MAA（供一键设置 MAA.exe 路径） ----
+function readMaaVersionLabel(dir) {
+  const m = /v?(\d+\.\d+(?:\.\d+)?)/i.exec(path.basename(dir));
+  if (m) return 'v' + m[1];
+  try {
+    const st = fs.statSync(path.join(dir, 'MAA.exe'));
+    return `${new Date(st.mtimeMs).toLocaleDateString()} 的程序`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function collectMaaExe(dir, out, depth) {
+  if (!dir || depth < 0) return;
+  try {
+    if (fs.existsSync(path.join(dir, 'MAA.exe'))) { out.push(dir); return; }
+  } catch (e) { return; }
+  if (depth === 0) return;
+  let subs = [];
+  try { subs = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+  for (const s of subs) {
+    if (!s.isDirectory()) continue;
+    const n = s.name.toLowerCase();
+    if (n === 'node_modules' || n.startsWith('.') || n === '$recycle.bin' || n === 'windows') continue;
+    if (depth <= 1 && !/maa/i.test(n)) continue; // 深层只进入名字含 maa 的目录
+    collectMaaExe(path.join(dir, s.name), out, depth - 1);
+  }
+}
+
+function autoDetectMaa() {
+  const roots = [];
+  const addRoot = (p) => { try { if (p && fs.existsSync(p) && !roots.includes(p)) roots.push(p); } catch (e) { /* noop */ } };
+  const home = process.env.USERPROFILE || '';
+  addRoot(process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs'));
+  addRoot(process.env.LOCALAPPDATA);
+  addRoot(process.env.APPDATA);
+  addRoot('C:\\Program Files');
+  addRoot('C:\\Program Files (x86)');
+  addRoot(home && path.join(home, 'Desktop'));
+  addRoot(home && path.join(home, 'Downloads'));
+  addRoot(home && path.join(home, 'Documents'));
+  addRoot(home);
+  for (const letter of ['C', 'D', 'E', 'F', 'G', 'H']) addRoot(`${letter}:\\`);
+
+  const foundDirs = [];
+  for (const root of roots) {
+    collectMaaExe(root, foundDirs, 1); // 根目录自身 / 直接子目录
+    let subs = [];
+    try { subs = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { continue; }
+    const isDiskRoot = /^[A-Z]:\\$/i.test(root);
+    for (const s of subs) {
+      if (!s.isDirectory()) continue;
+      const n = s.name.toLowerCase();
+      if (n === 'node_modules' || n.startsWith('.') || n === '$recycle.bin' || n === 'windows' || n === 'system volume information') continue;
+      const subPath = path.join(root, s.name);
+      if (/maa/i.test(n)) {
+        collectMaaExe(subPath, foundDirs, 3);
+      } else if (isDiskRoot) {
+        // 磁盘根：再往下看一层（如 D:\Games\MAA-v6.16.0-win-x64）
+        let subs2 = [];
+        try { subs2 = fs.readdirSync(subPath, { withFileTypes: true }); } catch (e) { continue; }
+        for (const s2 of subs2) {
+          if (s2.isDirectory() && /maa/i.test(s2.name)) collectMaaExe(path.join(subPath, s2.name), foundDirs, 3);
+        }
+      }
+    }
+  }
+
+  const uniq = [...new Set(foundDirs)];
+  const results = uniq.map((dir) => {
+    const exePath = path.join(dir, 'MAA.exe');
+    let mtime = 0;
+    try { mtime = fs.statSync(exePath).mtimeMs; } catch (e) { /* noop */ }
+    return { exePath, dir, version: readMaaVersionLabel(dir), mtime };
+  }).sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+
+  console.log('[maa] 自动搜索完成，找到', results.length, '个 MAA');
+  return { ok: true, count: results.length, results };
+}
+
+ipcMain.handle('maa:autoDetect', () => {
+  try {
+    return autoDetectMaa();
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+
 ipcMain.handle('maa:configOpenDir', async () => {
   const ps = maaConfigPaths();
   if (!ps) return { ok: false, error: '尚未配置 MAA 路径' };
@@ -1451,6 +1539,7 @@ ipcMain.handle('maa:globalGet', () => {
     configs: r.ok ? Object.keys(r.json.Configurations || {}) : [],
     configError: r.ok ? '' : r.error,
     maaConfigured: !!(mp.exePath && fs.existsSync(mp.exePath)),
+    exePath: mp.exePath,
     autoStartTask: mp.autoStartTask,
     skipIfRunning: mp.skipIfRunning,
     dateConfigs: mp.dateConfigs,
