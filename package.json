@@ -13,7 +13,6 @@
   "build": {
     "appId": "cn.evestudio.calendar",
     "productName": "开源日历",
-    "artifactName": "开源日历 Setup ${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -45,7 +44,11 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "开源日历"
+      "shortcutName": "开源日历",
+      "artifactName": "开源日历 Setup ${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "开源日历 便携版 ${version}.${ext}"
     }
   },
   "devDependencies": {
