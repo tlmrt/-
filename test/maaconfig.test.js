@@ -182,5 +182,26 @@ console.log('\n[9] 活动本按"最新活动优先"排序');
   ok('活动本按活动编号降序（最新优先）', s.slice(1).map((l) => l.code).join(',') === 'BI-1,TW-1,GT-1', s.map((l) => l.code).join(','));
 }
 
+console.log('\n[10] 按分组名 / 开放状态搜索');
+{
+  const levels = [
+    { code: 'Annihilation', stageId: 'annihilation', group: 'special', groupLabel: '剿灭', openState: 'always' },
+    { code: '1-7', stageId: 'main_01-07', group: 'common', groupLabel: '常用', openState: 'always' },
+    { code: 'SR-1', stageId: 'act54side_01', group: 'current', groupLabel: '当期活动', openState: 'open' },
+    { code: 'GT-1', stageId: 'a001_01_perm', group: 'event', groupLabel: '活动', openState: 'past' },
+    { code: 'CE-6', stageId: 'wk_melee_6', group: 'resource', groupLabel: '资源本', openState: 'always' },
+  ];
+  ok('搜索「剿灭」能找到剿灭关卡', searchLevels('剿灭', levels).map((l) => l.code).join(',') === 'Annihilation');
+  ok('搜索「常用」命中常用组', searchLevels('常用', levels).map((l) => l.code).join(',') === '1-7');
+  ok('搜索「当期活动」命中开放活动', searchLevels('当期活动', levels).map((l) => l.code).join(',') === 'SR-1');
+  ok('搜索「活动」可同时命中当期与往期', searchLevels('活动', levels).map((l) => l.code).sort().join(',') === 'GT-1,SR-1');
+  ok('搜索「资源本」命中资源组', searchLevels('资源本', levels).map((l) => l.code).join(',') === 'CE-6');
+  ok('搜索开放状态「开放中」', searchLevels('开放中', levels).map((l) => l.code).join(',') === 'SR-1');
+  ok('搜索开放状态「往期」', searchLevels('往期', levels).map((l) => l.code).join(',') === 'GT-1');
+  ok('搜索开放状态「常驻」命中多个', searchLevels('常驻', levels).length === 3);
+  ok('英文分组名也可搜（special）', searchLevels('special', levels).map((l) => l.code).join(',') === 'Annihilation');
+  ok('代号搜索仍然优先（ce6）', searchLevels('ce6', levels).map((l) => l.code).join(',') === 'CE-6');
+}
+
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

@@ -986,6 +986,18 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 /* 关卡选择控件 */
 .maa-levels { position: relative; }
 .ml-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; }
+.ml-groups { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.ml-groupbtn {
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px 9px;
+  cursor: pointer;
+  color: var(--text-2);
+  background: #fff;
+  transition: all .12s;
+}
+.ml-groupbtn:hover { border-color: var(--primary); color: var(--primary); background: rgba(var(--primary-rgb), .06); }
 .ml-chip {
   display: inline-flex;
   align-items: center;

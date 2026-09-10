@@ -1573,7 +1573,7 @@ function normalizeStageCodeLocal(input) {
 function searchLevelsLocal(keyword) {
   const raw = String(keyword == null ? '' : keyword).trim();
   const rank = { current: 0, common: 1, special: 2, event: 3, resource: 4, main: 5, other: 6 };
-  const rankOf = (l) => (rank[l.group] !== undefined ? rank[l.group] : 5);
+  const rankOf = (l) => (rank[l.group] !== undefined ? rank[l.group] : 7);
   const byGroup = (a, b) => {
     const g = rankOf(a) - rankOf(b);
     if (g) return g;
@@ -1589,18 +1589,22 @@ function searchLevelsLocal(keyword) {
   const scored = [];
   for (const l of maaLevels) {
     const ck = stageKeyLocal(l.code);
+    const label = String(l.groupLabel || '').toLowerCase();
+    const groupName = String(l.group || '').toLowerCase();
+    const stateTxt = l.openState === 'open' ? '开放中' : l.openState === 'past' ? '往期' : '常驻';
     let score = 0;
     if (ck === key) score = 100;
     else if (ck.startsWith(key)) score = 80;
     else if (ck.includes(key)) score = 60;
+    else if (label && label.includes(lower)) score = 55;   // 按分组名搜（剿灭/常用/当期活动…）
+    else if (groupName && groupName.includes(lower)) score = 50;
+    else if (stateTxt.includes(raw)) score = 50;           // 开放状态（开放中/往期/常驻）
     else if ((l.drops || []).some((d) => String(d).toLowerCase().includes(lower))) score = 40;
     else if (String(l.stageId || '').toLowerCase().includes(lower)) score = 20;
     if (score) scored.push({ score, l });
   }
-  scored.sort((a, b) => b.score - a.score
-    || rankOf(a.l) - rankOf(b.l)
-    || String(a.l.code).localeCompare(String(b.l.code), 'zh-CN', { numeric: true, sensitivity: 'base' }));
-  return scored.slice(0, 12).map((x) => x.l);
+  scored.sort((a, b) => b.score - a.score || byGroup(a.l, b.l));
+  return scored.slice(0, 30).map((x) => x.l);
 }
 
 $('#btnDayMaa').addEventListener('click', () => openMaaPanel(selectedDate));
@@ -1655,11 +1659,12 @@ function maaFieldHtml(t, f) {
   if (f.widget === 'levels') {
     const picked = String(f.value || '').split('\n').map((s) => s.trim()).filter(Boolean);
     const ph = maaLevels.length
-      ? '输入关卡代号或掉落物名（如 1-7 / 作战记录），回车确认'
+      ? '输入关卡代号、分组名（如“剿灭”“常用”）或掉落物名，回车确认'
       : `关卡数据未载入${maaLevelsError ? '：' + maaLevelsError : ''}`;
     return `<div class="maa-f maa-f-wide">
       <span>${esc(f.label)}</span>
       <div class="maa-levels" data-key="${key}" data-type="list" data-levels="${esc(picked.join(','))}">
+        <div class="ml-groups"></div>
         <div class="ml-chips"></div>
         <input type="text" class="ml-input" placeholder="${esc(ph)}" />
         <div class="ml-suggest" hidden></div>
@@ -1754,7 +1759,7 @@ function bindLevelsWidget(scope) {
         return;
       }
       sug.hidden = false;
-      const groupHint = '<div class="ml-hint">按「当期活动 → 常用 → 剿灭 → 活动 → 资源本 → 主线」排列（已标注开放状态）</div>';
+      const groupHint = '<div class="ml-hint">可直接输入分组名搜索（如「剿灭」「常用」「当期活动」「往期」），或点上方分组按钮筛选</div>';
       sug.innerHTML = groupHint + hits.map((l) => `<div class="ml-item" data-code="${esc(l.code)}">
           <b>${esc(l.code)}</b>
           ${l.groupLabel ? `<span class="ml-group g-${esc(l.group || 'other')}">${esc(l.groupLabel)}</span>` : ''}
@@ -1763,6 +1768,30 @@ function bindLevelsWidget(scope) {
         </div>`).join('');
       sug.querySelectorAll('.ml-item[data-code]').forEach((it) => {
         it.addEventListener('mousedown', (e) => { e.preventDefault(); add(it.dataset.code); });
+      });
+    }
+
+    const groupBox = box.querySelector('.ml-groups');
+    if (groupBox) {
+      const labels = [];
+      const seen = new Set();
+      for (const l of maaLevels) {
+        if (l.groupLabel && !seen.has(l.groupLabel)) { seen.add(l.groupLabel); labels.push(l.groupLabel); }
+      }
+      groupBox.innerHTML = ['全部', ...labels]
+        .map((t) => `<span class="ml-groupbtn" data-g="${esc(t)}">${esc(t)}</span>`).join('');
+      groupBox.querySelectorAll('.ml-groupbtn').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const t = btn.dataset.g;
+          if (t === '全部') {
+            input.value = '';
+            showSuggest('');
+          } else {
+            input.value = t;
+            showSuggest(t);
+          }
+        });
       });
     }
 

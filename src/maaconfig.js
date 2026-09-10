@@ -295,7 +295,14 @@ function levelCompare(a, b) {
   return String(a && a.code).localeCompare(String(b && b.code), 'zh-CN', { numeric: true, sensitivity: 'base' });
 }
 
-// 搜索关卡：支持代号模糊匹配 + 掉落物名匹配，返回候选项（最多 limit 条）
+// 开放状态中文（与渲染层一致）
+function openStateText(state) {
+  if (state === 'open') return '开放中';
+  if (state === 'past') return '往期';
+  return '常驻';
+}
+
+// 搜索关卡：支持代号模糊 + 分组名（剿灭/常用/当期活动…）+ 开放状态 + 掉落物名
 function searchLevels(keyword, levels, limit) {
   const list = Array.isArray(levels) ? levels : [];
   const max = Number.isFinite(limit) ? limit : 12;
@@ -310,10 +317,16 @@ function searchLevels(keyword, levels, limit) {
   const scored = [];
   for (const l of list) {
     const codeKey = stageKey(l.code);
+    const label = String(l.groupLabel || '').toLowerCase();
+    const groupName = String(l.group || '').toLowerCase();
+    const stateTxt = openStateText(l.openState);
     let score = 0;
     if (codeKey === key) score = 100;
     else if (codeKey.startsWith(key)) score = 80;
     else if (codeKey.includes(key)) score = 60;
+    else if (label && label.includes(lower)) score = 55;              // 按分组名搜索（如"剿灭"/"常用"/"当期活动"）
+    else if (groupName && groupName.includes(lower)) score = 50;      // 英文分组名（common/event…）
+    else if (stateTxt.includes(raw)) score = 50;                      // 开放状态（开放中/往期/常驻）
     else if ((l.drops || []).some((d) => String(d).toLowerCase().includes(lower))) score = 40;
     else if ((l.stageId || '').toLowerCase().includes(lower)) score = 20;
     if (score > 0) scored.push({ score, level: l });
