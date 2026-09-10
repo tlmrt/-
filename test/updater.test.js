@@ -1,5 +1,5 @@
 // 应用更新逻辑单测：node test/updater.test.js
-const { normalizeVersion, compareVersions, pickWindowsAsset, parseRelease, shouldNotify } = require('../src/updater');
+const { normalizeVersion, compareVersions, pickWindowsAsset, parseRelease, shouldNotify, errText, describeNetError } = require('../src/updater');
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -72,6 +72,29 @@ console.log('\n[4] 是否提示（忽略某个版本）');
   ok('已忽略该版本则不提示', shouldNotify(info, '0.2.0') === false);
   ok('忽略的是旧版本仍提示', shouldNotify(info, '0.1.5') === true);
   ok('没有更新不提示', shouldNotify(parseRelease({ tag_name: 'v0.1.0', assets: [] }, '0.1.0'), null) === false);
+}
+
+console.log('\n[5] 网络错误提示（把底层报错翻成人话）');
+{
+  ok('取到 message 与 cause 链',
+    errText({ message: 'fetch failed', cause: { message: 'unable to verify the first certificate' } }) === 'fetch failed | unable to verify the first certificate');
+  ok('字符串输入原样返回', errText('boom') === 'boom');
+  ok('null / undefined 安全', errText(null) === '' && errText(undefined) === '');
+
+  const cert = describeNetError({ message: 'fetch failed', cause: { message: 'unable to verify the first certificate' } });
+  ok('证书错误 → 指向本机加速器/代理', /证书/.test(cert) && /加速器|代理/.test(cert), cert);
+  const dns = describeNetError(new Error('getaddrinfo ENOTFOUND api.github.com'));
+  ok('域名解析失败 → 专门提示', /解析失败/.test(dns), dns);
+  const conn = describeNetError(new Error('fetch failed'));
+  ok('连不上 → 网络/代理提示', /无法连接 GitHub/.test(conn), conn);
+  const nf = describeNetError(new Error('仓库或 Release 不存在（请检查仓库地址与是否已发布 Release）'));
+  ok('404 → 保留仓库语义', /仓库或 Release 不存在/.test(nf), nf);
+  const rl = describeNetError(new Error('GitHub API 访问受限（可能触发了频率限制，稍后再试）'));
+  ok('限流 → 保留频率限制语义', /频率/.test(rl), rl);
+  ok('未知错误也给提示', describeNetError({}).includes('检查更新失败'));
+  ok('多通道错误合并后仍能识别证书类',
+    /证书/.test(describeNetError('Chromium 网络栈: unable to verify the first certificate → Node: unable to verify the first certificate')));
+  ok('提示里带上原始错误便于排查', describeNetError(new Error('ETIMEDOUT')).includes('ETIMEDOUT'));
 }
 
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);

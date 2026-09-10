@@ -172,7 +172,7 @@ evestudio-calendar/
 ├─ extras/
 │  ├─ demo-hello.js     单文件插件示例
 │  └─ demo-plugin/      文件夹插件示例
-├─ test/                单元测试（234 项，npm test 一键运行）
+├─ test/                单元测试（251 项，npm test 一键运行）
 ├─ assets/              图标 / 横幅 / 赞助码
 ├─ RELEASE_NOTES.md     版本发布说明
 ├─ push-to-github.ps1   推送脚本（绕过本机 git 镜像重写）
@@ -184,5 +184,21 @@ evestudio-calendar/
 ## 🧪 测试
 
 ```bash
-npm test   # 234 项单测：提醒引擎 / 节日农历 / 节假日 / 更新 / MAA / 本地接口
+npm test   # 251 项单测：提醒引擎 / 节日农历 / 节假日 / 更新 / MAA / 本地接口
 ```
+
+## ❓ 常见问题
+
+**Q：「检查更新」总是失败？**
+
+多半不是应用坏了，而是本机网络环境的问题（应用会优先走 Chromium 网络栈，读 Windows 证书库、走系统代理，但 GitHub 仍需真的可达）：
+
+1. **装了 Steam++ / Watt Toolkit / Clash 之类的加速器或代理**：先确认它的「网络加速 / 系统代理」是开着的；若它的根证书没被信任，请重新在加速器里安装一次证书（或先关掉它，让应用直连）。
+2. **公司 / 校园网限制 GitHub**：点设置里的「打开发布页」，用浏览器手动下载安装包，双击覆盖安装即可，**数据保留**。
+3. **想确认到底是证书问题还是网络不通**（两条命令对比，后者成功、前者失败 ⇒ 证书信任问题）：
+
+```powershell
+node -e "fetch('https://api.github.com').then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.message))"
+node --use-system-ca -e "fetch('https://api.github.com').then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.message))"
+```
+

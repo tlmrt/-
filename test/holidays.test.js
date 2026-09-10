@@ -5,6 +5,8 @@ const {
   monthHolidays,
   urlForYear,
   yearsOf,
+  holidaySourceList,
+  MIRROR_URL_TEMPLATES,
   DEFAULT_URL_TEMPLATE,
 } = require('../src/holidays');
 
@@ -71,6 +73,18 @@ console.log('\n[5] 覆盖年份统计');
   const map = { '2025-10-01': {}, '2026-01-01': {}, '2026-12-31': {}, '2027-05-01': {} };
   ok('去重并升序', JSON.stringify(yearsOf(map)) === JSON.stringify([2025, 2026, 2027]));
   ok('空地图返回空数组', yearsOf(null).length === 0);
+}
+
+console.log('\n[6] 多源回退列表（单源抽风也能更新）');
+{
+  const list = holidaySourceList(DEFAULT_URL_TEMPLATE, 2026);
+  ok('首选源排第一', list[0].includes('cdn.jsdelivr.net') && list[0].endsWith('2026.json'), list[0]);
+  ok('至少含 3 个候选源', list.length >= 3, String(list.length));
+  ok('没有任何重复地址', new Set(list).size === list.length);
+  const custom = holidaySourceList('https://example.com/d/{year}.json', 2025);
+  ok('自定义模板仍是首选', custom[0] === 'https://example.com/d/2025.json');
+  ok('自定义模板仍会带上镜像兜底', custom.length >= 3 && custom.some((u) => u.includes('jsdelivr')));
+  ok('模板与镜像相同时不重复追加', holidaySourceList(MIRROR_URL_TEMPLATES[0], 2026).filter((u) => u === MIRROR_URL_TEMPLATES[0].replace('{year}', '2026')).length === 1);
 }
 
 console.log(`\n结果：${pass} 通过, ${fail} 失败`);

@@ -2,7 +2,7 @@
 // EveStudio Calendar — 主进程
 // 窗口 / 托盘 / 本地数据 / 提醒调度 / IPC
 // ============================================================
-const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, dialog, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, dialog, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Readable, Transform } = require('stream');
@@ -15,10 +15,10 @@ const {
   parseYearFile,
   mergeHolidayMaps,
   monthHolidays,
-  urlForYear,
   yearsOf,
+  holidaySourceList,
 } = require('./holidays');
-const { parseRelease, shouldNotify } = require('./updater');
+const { parseRelease, shouldNotify, errText, describeNetError } = require('./updater');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
@@ -460,18 +460,25 @@ ipcMain.handle('holidays:update', async () => {
     return { ok: false, results: [{ year: 0, ok: false, error: '无法创建数据目录' }] };
   }
   for (const yy of years) {
-    const url = urlForYear(hp.urlTemplate, yy);
-    try {
-      const res = await fetch(url, { cache: 'no-cache' });
-      if (!res.ok) { results.push({ year: yy, ok: false, error: `HTTP ${res.status}` }); continue; }
-      const json = await res.json();
-      const map = parseYearFile(json);
-      if (!Object.keys(map).length) { results.push({ year: yy, ok: false, error: '数据为空或不兼容' }); continue; }
-      fs.writeFileSync(path.join(HOLIDAY_DIR(), `${yy}.json`), JSON.stringify(json, null, 2), 'utf-8');
-      results.push({ year: yy, ok: true, count: Object.keys(map).length });
-    } catch (err) {
-      results.push({ year: yy, ok: false, error: String(err && err.message ? err.message : err) });
+    // 每个年份依次尝试多个数据源（默认 jsdelivr + 各镜像 + raw），任一成功即用
+    let saved = false;
+    let lastErr = '所有数据源都不可用';
+    for (const url of holidaySourceList(hp.urlTemplate, yy)) {
+      try {
+        const res = await httpFetch(url, { cache: 'no-cache' });
+        if (!res.ok) { lastErr = `HTTP ${res.status}`; continue; }
+        const json = await res.json();
+        const map = parseYearFile(json);
+        if (!Object.keys(map).length) { lastErr = '数据为空或不兼容'; continue; }
+        fs.writeFileSync(path.join(HOLIDAY_DIR(), `${yy}.json`), JSON.stringify(json, null, 2), 'utf-8');
+        results.push({ year: yy, ok: true, count: Object.keys(map).length, source: url });
+        saved = true;
+        break;
+      } catch (err) {
+        lastErr = errText(err);
+      }
     }
+    if (!saved) results.push({ year: yy, ok: false, error: lastErr });
   }
   loadHolidays();
   prefs.holidays = { ...holidayPrefs(), updatedAt: Date.now() };
@@ -517,6 +524,41 @@ ipcMain.handle('holidays:openDir', async () => {
   }
 });
 
+// ---------------- 统一的网络请求入口 ----------------
+// 主进程里直接调 fetch() 用的是 Node 自带实现：它只认 Node 内置 CA 列表，
+// 既不读 Windows 证书库、也不走系统代理。本机若装了 Steam++ / Watt Toolkit / Clash 之类的
+// HTTPS 加速器（它们把 github.com 等域名指到 127.0.0.1 做中间人转发），Node fetch 会直接报
+// "unable to verify the first certificate"，在界面上就表现为「检查更新失败」。
+// 因此这里统一优先走 Electron 的 net.fetch（Chromium 网络栈：读 Windows 证书库 + 系统代理），
+// 失败再回退 Node fetch，并把两边的失败原因合并上报，方便定位。
+function chromiumFetchAvailable() {
+  return !!(net && typeof net.fetch === 'function' && app.isReady());
+}
+
+async function httpFetch(url, init) {
+  const opts = init || {};
+  const failures = [];
+  if (chromiumFetchAvailable()) {
+    const co = { ...opts };
+    delete co.cache; // Chromium 网络栈自行管理缓存，不接受该选项
+    try {
+      return await net.fetch(url, co);
+    } catch (e) {
+      const msg = errText(e);
+      failures.push(`Chromium 网络栈: ${msg}`);
+      console.warn('[net] Chromium 网络栈请求失败，改试 Node 直连：', url, msg);
+    }
+  }
+  try {
+    return await fetch(url, opts);
+  } catch (e) {
+    failures.push(`Node: ${errText(e)}`);
+  }
+  const err = new Error(failures.join(' → '));
+  err.cause = failures.join(' → ');
+  throw err;
+}
+
 // ---------------- 应用更新（直连 GitHub 仓库） ----------------
 const DEFAULT_UPDATE_PREFS = { autoCheck: true, repo: '', lastCheck: null, ignoredVersion: null };
 // 发行方锁定的 GitHub 仓库（设置里不可修改，更新检查/Star 均使用它）
@@ -555,7 +597,7 @@ function githubHeaders() {
 }
 
 async function fetchLatestRelease(repo) {
-  const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+  const res = await httpFetch(`https://api.github.com/repos/${repo}/releases/latest`, {
     headers: githubHeaders(),
     cache: 'no-cache',
   });
@@ -582,7 +624,7 @@ async function checkForUpdates(opts) {
     }
     return info;
   } catch (e) {
-    const err = { ok: false, error: String(e && e.message ? e.message : e) };
+    const err = { ok: false, error: describeNetError(e) };
     updateState.lastResult = err;
     console.error('[update] 检查失败', err.error);
     return err;
@@ -635,31 +677,48 @@ ipcMain.handle('update:download', async () => {
   if (!info || !info.ok || !info.downloadUrl) return { ok: false, error: '没有可下载的安装包，请先检查更新' };
   try {
     fs.mkdirSync(UPDATE_DIR(), { recursive: true });
-    const dest = path.join(UPDATE_DIR(), info.assetName || `EveCalendar-${info.latest}.exe`);
-    const res = await fetch(info.downloadUrl, { headers: githubHeaders(), redirect: 'follow' });
-    if (!res.ok || !res.body) throw new Error(`下载失败 HTTP ${res.status}`);
-    const total = Number(res.headers.get('content-length') || 0);
-    let received = 0;
-    updateState.progress = 0;
-    const counter = new Transform({
-      transform(chunk, enc, cb) {
-        received += chunk.length;
-        if (total) {
-          const pct = Math.round((received / total) * 100);
-          updateState.progress = pct;
-          if (win && !win.isDestroyed()) win.webContents.send('update:progress', { percent: pct, received, total });
-        }
-        cb(null, chunk);
-      },
-    });
-    await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
-    updateState.downloadedFile = dest;
-    updateState.progress = 100;
-    return { ok: true, file: dest };
   } catch (e) {
-    updateState.progress = 0;
-    return { ok: false, error: String(e && e.message ? e.message : e) };
+    return { ok: false, error: '无法创建更新目录：' + errText(e) };
   }
+  const dest = path.join(UPDATE_DIR(), info.assetName || `EveCalendar-${info.latest}.exe`);
+  // 先走 Chromium 网络栈（读 Windows 证书库，兼容本机 HTTPS 加速器/代理），
+  // 中途失败就删掉半成品、整体换 Node 直连重下一次，两次都失败才报错
+  const modes = chromiumFetchAvailable() ? ['chromium', 'node'] : ['node'];
+  const failures = [];
+  for (const mode of modes) {
+    try {
+      updateState.progress = 0;
+      const res = mode === 'chromium'
+        ? await net.fetch(info.downloadUrl, { headers: githubHeaders(), redirect: 'follow' })
+        : await fetch(info.downloadUrl, { headers: githubHeaders(), redirect: 'follow' });
+      if (!res.ok || !res.body) throw new Error(`下载失败 HTTP ${res.status}`);
+      const total = Number(res.headers.get('content-length') || 0);
+      let received = 0;
+      const counter = new Transform({
+        transform(chunk, enc, cb) {
+          received += chunk.length;
+          if (total) {
+            const pct = Math.round((received / total) * 100);
+            updateState.progress = pct;
+            if (win && !win.isDestroyed()) win.webContents.send('update:progress', { percent: pct, received, total });
+          }
+          cb(null, chunk);
+        },
+      });
+      await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
+      updateState.downloadedFile = dest;
+      updateState.progress = 100;
+      console.log(`[update] 安装包下载完成（${mode === 'chromium' ? 'Chromium 网络栈' : 'Node 直连'}）：${dest}`);
+      return { ok: true, file: dest };
+    } catch (e) {
+      const msg = errText(e);
+      failures.push(`${mode === 'chromium' ? 'Chromium 网络栈' : 'Node'}: ${msg}`);
+      console.warn('[update] 下载失败，尝试下一条通道：', msg);
+      try { fs.rmSync(dest, { force: true }); } catch (_) { /* 清理失败不影响结果 */ }
+      updateState.progress = 0;
+    }
+  }
+  return { ok: false, error: describeNetError(failures.join(' → ')) };
 });
 
 // 打开已下载的安装包（由用户确认后运行安装，覆盖升级）
@@ -677,10 +736,12 @@ ipcMain.handle('update:install', async () => {
 
 ipcMain.handle('update:openPage', async () => {
   const info = updateState.lastResult;
-  if (!info || !info.pageUrl) return { ok: false, error: '没有发布页地址' };
+  // 检查失败时 lastResult 里没有 pageUrl，此时退回到仓库的 Releases 页面，
+  // 保证在网络/证书出问题时始终有一条「用浏览器手动下载」的退路
+  const url = (info && info.pageUrl) || `https://github.com/${LOCKED_UPDATE_REPO}/releases`;
   try {
-    await shell.openExternal(info.pageUrl);
-    return { ok: true };
+    await shell.openExternal(url);
+    return { ok: true, url };
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) };
   }

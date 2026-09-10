@@ -2156,7 +2156,8 @@ async function updateUpdateUI() {
   $('#updStatus').textContent = txt;
   $('#btnUpdDownload').hidden = !(r && r.ok && r.hasUpdate);
   $('#btnUpdInstall').hidden = !st.downloaded;
-  $('#btnUpdPage').hidden = !(r && r.pageUrl);
+  // 发布页按钮常显：即使检查失败（网络/证书问题），也能用浏览器手动下载安装包
+  $('#btnUpdPage').hidden = false;
 }
 
 $('#utLater').addEventListener('click', () => { $('#updateToast').hidden = true; });

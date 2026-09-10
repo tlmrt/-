@@ -65,4 +65,51 @@ function shouldNotify(info, ignoredVersion) {
   return true;
 }
 
-module.exports = { normalizeVersion, compareVersions, pickWindowsAsset, parseRelease, shouldNotify };
+// ---------------- 网络错误翻译 ----------------
+// 把底层错误（含 cause 链）压成一行文本
+function errText(e) {
+  if (e == null) return '';
+  if (typeof e === 'string') return e;
+  const parts = [];
+  try {
+    if (e.message) parts.push(String(e.message));
+    if (e.cause) parts.push(e.cause && e.cause.message ? String(e.cause.message) : String(e.cause));
+    if (e.code) parts.push(String(e.code));
+  } catch (_) { /* 忽略取值异常 */ }
+  return parts.filter(Boolean).join(' | ') || String(e);
+}
+
+// 把网络错误翻成用户能看懂、能自己动手解决的中文提示。
+// 背景：本机若装了 Steam++ / Watt Toolkit 之类的 HTTPS 加速器，会把 github.com 解析到 127.0.0.1
+// 做中间人转发，此时「证书不被信任」和「代理没开导致连接被拒」是最常见的两种失败。
+function describeNetError(e) {
+  const raw = errText(e).trim().slice(0, 200);
+  const s = raw.toLowerCase();
+  const manualTip = '也可在「设置 → 应用更新」点「打开发布页」，用浏览器手动下载安装包。';
+  if (/unable to verify|self[- ]signed|local issuer|err_tls|certificate|cert_|ssl|schannel/.test(s)) {
+    return `HTTPS 证书校验失败：GitHub 流量正被本机代理/加速器（Steam++ / Watt Toolkit / Clash 等）转发，而它的根证书未被信任。请打开加速器的「网络加速」后重试，或关闭加速器让应用直连。${manualTip}（原始错误：${raw}）`;
+  }
+  if (/enotfound|eai_again|getaddrinfo|name resolution|no such host/.test(s)) {
+    return `域名解析失败，找不到 GitHub 服务器：请检查网络或代理设置。${manualTip}（原始错误：${raw}）`;
+  }
+  if (/etimedout|timeout|econnrefused|econnreset|econnaborted|socket hang up|network|fetch failed|offline|enetunreach|ehostunreach|epipe/.test(s)) {
+    return `无法连接 GitHub 服务器：网络不通，或代理/加速器没开启。请检查网络后重试。${manualTip}（原始错误：${raw}）`;
+  }
+  if (/404|not found|不存在/.test(s)) {
+    return `仓库或 Release 不存在：请确认该 GitHub 仓库已发布 Release（tag 形如 v0.2.0）。${manualTip}（原始错误：${raw}）`;
+  }
+  if (/403|rate limit|forbidden|频率/.test(s)) {
+    return `GitHub API 访问受限（可能触发了频率限制），稍后再试。${manualTip}（原始错误：${raw}）`;
+  }
+  return raw ? `检查更新失败：${raw} ${manualTip}` : '检查更新失败（未知错误）';
+}
+
+module.exports = {
+  normalizeVersion,
+  compareVersions,
+  pickWindowsAsset,
+  parseRelease,
+  shouldNotify,
+  errText,
+  describeNetError,
+};

@@ -70,12 +70,34 @@ function yearsOf(map) {
   return [...set].sort((a, b) => a - b);
 }
 
+// 备用镜像源（国内直连 jsdelivr 的多个 CDN 节点都比 raw.githubusercontent 稳；
+// 实测 2026 年数据：三个 jsdelivr 节点均 200，raw.githubusercontent 会 502）
+const MIRROR_URL_TEMPLATES = [
+  'https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json',
+  'https://fastly.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json',
+  'https://gcore.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json',
+  FALLBACK_URL_TEMPLATE,
+];
+
+// 某年数据的候选下载地址列表：用户/默认模板排第一，其后自动追加镜像源（去重）
+// 任一源成功即用，避免单一源抽风就更新失败
+function holidaySourceList(urlTemplate, year) {
+  const list = [urlForYear(urlTemplate, year)];
+  for (const t of MIRROR_URL_TEMPLATES) {
+    const u = urlForYear(t, year);
+    if (!list.includes(u)) list.push(u);
+  }
+  return list;
+}
+
 module.exports = {
   DEFAULT_URL_TEMPLATE,
   FALLBACK_URL_TEMPLATE,
+  MIRROR_URL_TEMPLATES,
   parseYearFile,
   mergeHolidayMaps,
   monthHolidays,
   urlForYear,
   yearsOf,
+  holidaySourceList,
 };
