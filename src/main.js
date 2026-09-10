@@ -8,6 +8,14 @@ const fs = require('fs');
 const dayjs = require('dayjs');
 const { computeAlertsInWindow } = require('./reminder');
 const { buildMonthFestivals, festivalMeta, normalizeFestivalPrefs, DEFAULT_FESTIVAL_PREFS } = require('./festivals');
+const {
+  DEFAULT_URL_TEMPLATE: HOLIDAY_URL,
+  parseYearFile,
+  mergeHolidayMaps,
+  monthHolidays,
+  urlForYear,
+  yearsOf,
+} = require('./holidays');
 
 const APP_ID = 'cn.evestudio.calendar';
 app.setAppUserModelId(APP_ID);
@@ -33,6 +41,7 @@ const DEFAULT_FESTIVAL_PREFS = { showLunar: true, countries: ['cn'], hidden: [] 
 let dayImgMap = {}; // { 'YYYY-MM-DD': fileName } 单日贴纸图
 let segments = [];  // 独立时间段 [{id,date,start,end,title,color}]，进行中时该日格子显示液体
 let widgetRecs = []; // 桌面小组件 [{id,date,x,y,alwaysOnTop}]
+let holidaysMap = {}; // 休息日/调休日 { 'YYYY-MM-DD': { type:'off'|'work', name } }
 const widgetWins = new Map(); // 小组件 id -> BrowserWindow
 
 const DATA_DIR = () => app.getPath('userData');
@@ -43,6 +52,8 @@ const IMG_DIR = () => path.join(DATA_DIR(), 'images');
 const PLUGIN_DIR = () => path.join(DATA_DIR(), 'plugins');
 const SEG_FILE = () => path.join(DATA_DIR(), 'segments.json');
 const WIDGET_FILE = () => path.join(DATA_DIR(), 'widgets.json');
+const SOUND_DIR = () => path.join(DATA_DIR(), 'sounds');
+const HOLIDAY_DIR = () => path.join(DATA_DIR(), 'holidays');
 
 // ---------------- 数据持久化 ----------------
 function loadJSON(file, fallback) {
@@ -182,20 +193,52 @@ function fireNotification(task, alert) {
     ? `${nowTxt} · ${task.note}`
     : `${nowTxt} · ${isRepeat ? '重复任务' : '任务到点啦！'}`;
 
+  const snd = alertSoundPrefs();
+  const useCustom = snd.mode === 'custom' && !!snd.file;
+
   if (Notification.isSupported()) {
     const n = new Notification({
       title: task.title || '日历提醒',
       body: `${body}${prioTxt ? ' [' + prioTxt + ']' : ''}`,
-      silent: !prefs.notifySound,
+      // 用自定义语音时不再播系统提示音，避免两种声音叠在一起
+      silent: !prefs.notifySound || useCustom,
     });
     n.on('click', () => focusTask(task.id));
     n.on('failed', () => showPopup(task, alert)); // 系统通知失败 → 兜底小窗
     n.show();
     console.log('[notify] fired', task.id, dayjs(alert.alertAt).format('YYYY-MM-DD HH:mm:ss'), task.title);
   }
+
+  // 自定义提醒语音：播放自选音频 +（可选）系统 TTS 朗读任务标题
+  if (useCustom || snd.speak) {
+    playAlertVoice({
+      file: useCustom ? snd.file : null,
+      volume: snd.volume,
+      speak: !!snd.speak,
+      text: snd.speakText
+        ? String(snd.speakText).replace(/\{title\}/g, task.title || '')
+        : `提醒：${task.title || '你有任务到点'}`,
+    });
+  }
+
   // 开发模式（未打包安装）下 Windows 常因应用没有开始菜单快捷方式而静默丢弃 toast，
   // 一律再弹一个置顶兜底小窗，保证提醒可见
   if (!app.isPackaged) showPopup(task, alert);
+}
+
+// 自定义提醒语音：把播放指令发给渲染层（<audio> 播文件、speechSynthesis 朗读）
+function playAlertVoice(payload) {
+  const send = (w) => {
+    try {
+      if (w && !w.isDestroyed()) w.webContents.send('alert-voice', payload);
+    } catch (e) {
+      console.error('发送提醒语音失败', e);
+    }
+  };
+  if (win && !win.isDestroyed()) { send(win); return; }
+  // 后台静默启动（--hidden）时主窗口尚未创建：临时创建一个隐藏窗口专门放声音
+  createWindow(false);
+  if (win) win.webContents.once('did-finish-load', () => send(win));
 }
 
 // 提醒兜底：置顶小窗，10 秒后自动消失
@@ -298,6 +341,129 @@ ipcMain.handle('festivals:month', (e, { year, month }) => {
   const m = Number(month);
   if (!y || !m || m < 1 || m > 12) return {};
   return buildMonthFestivals(y, m, festivalPrefs());
+});
+
+// ---------------- 节假日（休息日 / 调休上班日） ----------------
+const DEFAULT_HOLIDAY_PREFS = { showRest: true, showWorkday: true, urlTemplate: HOLIDAY_URL, updatedAt: null };
+
+function holidayPrefs() {
+  const h = prefs.holidays && typeof prefs.holidays === 'object' ? prefs.holidays : {};
+  return {
+    showRest: h.showRest !== false,
+    showWorkday: h.showWorkday !== false,
+    urlTemplate: typeof h.urlTemplate === 'string' && h.urlTemplate ? h.urlTemplate : HOLIDAY_URL,
+    updatedAt: h.updatedAt || null,
+  };
+}
+
+function loadHolidays() {
+  const maps = [];
+  try {
+    fs.mkdirSync(HOLIDAY_DIR(), { recursive: true });
+    for (const f of fs.readdirSync(HOLIDAY_DIR())) {
+      if (!/\.json$/i.test(f)) continue;
+      try {
+        const json = JSON.parse(fs.readFileSync(path.join(HOLIDAY_DIR(), f), 'utf-8').replace(/^\uFEFF/, ''));
+        maps.push(parseYearFile(json));
+      } catch (e) {
+        console.error('节假日文件解析失败', f, e);
+      }
+    }
+  } catch (e) {
+    console.error('读取节假日目录失败', e);
+  }
+  holidaysMap = mergeHolidayMaps(maps);
+  return holidaysMap;
+}
+
+function holidayStatus() {
+  const hp = holidayPrefs();
+  return {
+    years: yearsOf(holidaysMap),
+    count: Object.keys(holidaysMap).length,
+    updatedAt: hp.updatedAt,
+    dir: HOLIDAY_DIR(),
+    urlTemplate: hp.urlTemplate,
+    prefs: hp,
+  };
+}
+
+ipcMain.handle('holidays:status', () => holidayStatus());
+
+ipcMain.handle('holidays:month', (e, { year, month }) => {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) return {};
+  return monthHolidays(holidaysMap, y, m);
+});
+
+// 在线更新：从公开数据集拉取「去年 / 今年 / 明年」的放假安排
+ipcMain.handle('holidays:update', async () => {
+  const hp = holidayPrefs();
+  const thisYear = new Date().getFullYear();
+  const years = [thisYear - 1, thisYear, thisYear + 1];
+  const results = [];
+  try {
+    fs.mkdirSync(HOLIDAY_DIR(), { recursive: true });
+  } catch (e) {
+    return { ok: false, results: [{ year: 0, ok: false, error: '无法创建数据目录' }] };
+  }
+  for (const yy of years) {
+    const url = urlForYear(hp.urlTemplate, yy);
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (!res.ok) { results.push({ year: yy, ok: false, error: `HTTP ${res.status}` }); continue; }
+      const json = await res.json();
+      const map = parseYearFile(json);
+      if (!Object.keys(map).length) { results.push({ year: yy, ok: false, error: '数据为空或不兼容' }); continue; }
+      fs.writeFileSync(path.join(HOLIDAY_DIR(), `${yy}.json`), JSON.stringify(json, null, 2), 'utf-8');
+      results.push({ year: yy, ok: true, count: Object.keys(map).length });
+    } catch (err) {
+      results.push({ year: yy, ok: false, error: String(err && err.message ? err.message : err) });
+    }
+  }
+  loadHolidays();
+  prefs.holidays = { ...holidayPrefs(), updatedAt: Date.now() };
+  savePrefs();
+  const okCount = results.filter((r) => r.ok).length;
+  return { ok: okCount > 0, results, status: holidayStatus() };
+});
+
+// 手动导入本地 JSON（保底：网络不可用时自己下载后导入）
+ipcMain.handle('holidays:import', async () => {
+  if (!win) return { ok: false, error: '窗口未就绪' };
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: '导入节假日数据（JSON）',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (canceled || !filePaths.length) return { ok: false };
+  try {
+    const raw = fs.readFileSync(filePaths[0], 'utf-8').replace(/^\uFEFF/, '');
+    const json = JSON.parse(raw);
+    const map = parseYearFile(json);
+    const count = Object.keys(map).length;
+    if (!count) return { ok: false, error: '文件里没有可识别的 days 数据' };
+    const year = Number(json.year) || Number(Object.keys(map)[0].slice(0, 4));
+    fs.mkdirSync(HOLIDAY_DIR(), { recursive: true });
+    fs.writeFileSync(path.join(HOLIDAY_DIR(), `${year}.json`), JSON.stringify(json, null, 2), 'utf-8');
+    loadHolidays();
+    prefs.holidays = { ...holidayPrefs(), updatedAt: Date.now() };
+    savePrefs();
+    return { ok: true, year, count, status: holidayStatus() };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+
+ipcMain.handle('holidays:openDir', async () => {
+  try {
+    fs.mkdirSync(HOLIDAY_DIR(), { recursive: true });
+    await shell.openPath(HOLIDAY_DIR());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
 });
 
 // ---------------- 独立时间段 ----------------
@@ -507,6 +673,53 @@ ipcMain.handle('bgvideo:set', (e, fileName) => {
   return { ok: true };
 });
 
+// ---------------- 自定义提醒语音 ----------------
+const DEFAULT_SOUND_PREFS = { mode: 'system', file: null, volume: 0.8, speak: false, speakText: '' };
+
+function alertSoundPrefs() {
+  const s = prefs.alertSound && typeof prefs.alertSound === 'object' ? prefs.alertSound : {};
+  return {
+    mode: s.mode === 'custom' ? 'custom' : 'system',
+    file: s.file || null,
+    volume: typeof s.volume === 'number' ? Math.max(0, Math.min(1, s.volume)) : 0.8,
+    speak: !!s.speak,
+    speakText: typeof s.speakText === 'string' ? s.speakText : '',
+  };
+}
+
+function safeSoundAbs(fileName) {
+  if (!fileName || typeof fileName !== 'string') return null;
+  const abs = path.join(SOUND_DIR(), path.basename(fileName));
+  return fs.existsSync(abs) ? abs : null;
+}
+
+ipcMain.handle('sound:pick', async () => {
+  if (!win) return { ok: false };
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: '选择提醒语音文件',
+    properties: ['openFile'],
+    filters: [{ name: '音频', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'] }],
+  });
+  if (canceled || !filePaths.length) return { ok: false };
+  try {
+    const src = filePaths[0];
+    const ext = path.extname(src).toLowerCase();
+    const fileName = Date.now().toString(36) + Math.random().toString(36).slice(2, 7) + ext;
+    fs.mkdirSync(SOUND_DIR(), { recursive: true });
+    fs.copyFileSync(src, path.join(SOUND_DIR(), fileName));
+    const abs = path.join(SOUND_DIR(), fileName);
+    return { ok: true, fileName, url: absToFileUrl(abs), baseName: path.basename(src) };
+  } catch (e) {
+    console.error('复制音频失败', e);
+    return { ok: false, error: String(e && e.message) };
+  }
+});
+
+ipcMain.handle('sound:path', (e, fileName) => {
+  const abs = safeSoundAbs(fileName);
+  return abs ? { ok: true, url: absToFileUrl(abs) } : { ok: false };
+});
+
 // ---------------- 插件（开源扩展口） ----------------
 // 支持两种写法（都很简单）：
 //   ① 单文件插件：plugins/my-plugin.js —— 文件顶部用注释写元数据即可：
@@ -638,7 +851,7 @@ ipcMain.handle('plugins:openDir', async () => {
 });
 
 // ---------------- 窗口 / 托盘 ----------------
-function createWindow() {
+function createWindow(showOnReady = true) {
   win = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -653,11 +866,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      autoplayPolicy: 'no-user-gesture-required', // 允许到点自动播放自定义提醒语音
     },
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  win.once('ready-to-show', () => win.show());
+  // showOnReady=false 时只创建不显示（例如后台静默启动需要播放提醒语音）
+  win.once('ready-to-show', () => { if (showOnReady) win.show(); });
 
   // 调试快捷键（菜单栏已移除，这里补上开发者工具与刷新，方便插件开发）
   win.webContents.on('before-input-event', (ev, input) => {
@@ -836,6 +1051,9 @@ app.whenReady().then(() => {
 
   tasks = (loadJSON(TASKS_FILE(), { tasks: [] }).tasks) || [];
   prefs = { weekStart: 1, notifySound: true, ...loadJSON(PREFS_FILE(), {}) };
+  if (!prefs.alertSound || typeof prefs.alertSound !== 'object') prefs.alertSound = { ...DEFAULT_SOUND_PREFS };
+  if (!prefs.holidays || typeof prefs.holidays !== 'object') prefs.holidays = { ...DEFAULT_HOLIDAY_PREFS };
+  loadHolidays(); // 载入休息日 / 调休数据
   if (!prefs.festivals || typeof prefs.festivals !== 'object') prefs.festivals = { ...DEFAULT_FESTIVAL_PREFS };
   if (!Array.isArray(prefs.festivals.countries) || !prefs.festivals.countries.length) prefs.festivals.countries = ['cn'];
   if (!Array.isArray(prefs.festivals.hidden)) prefs.festivals.hidden = [];

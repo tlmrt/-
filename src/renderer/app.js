@@ -242,9 +242,38 @@ function clearFestCache() {
   festCache = {};
 }
 
+// ---------- 节假日 / 休息日（按月从主进程取，带缓存） ----------
+let holidayCache = {}; // `${y}-${m}` -> { 'YYYY-MM-DD': { type:'off'|'work', name } }
+const holidayLoading = {};
+
+function ensureHolidayMonth(y, m) {
+  const key = festKey(y, m);
+  if (holidayCache[key] || holidayLoading[key]) return;
+  holidayLoading[key] = true;
+  window.api.getHolidaysMonth(y, m)
+    .then((map) => { holidayCache[key] = map || {}; })
+    .catch((e) => { holidayCache[key] = {}; console.error('休息日数据加载失败', e); })
+    .finally(() => {
+      delete holidayLoading[key];
+      renderCalendar();
+      renderDayPanel();
+    });
+}
+
+function holidayOf(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  const map = holidayCache[festKey(y, m)];
+  return map ? map[dateStr] : null;
+}
+
+function holidayPrefsLocal() {
+  return Object.assign({ showRest: true, showWorkday: true }, prefs.holidays || {});
+}
+
 // ---------- 渲染月历 ----------
 function renderCalendar() {
   ensureFestMonth(viewY, viewM + 1); // 懒加载本月节日/农历，加载完自动重绘
+  ensureHolidayMonth(viewY, viewM + 1); // 懒加载本月休息日/调休数据
   const ws = prefs.weekStart === 0 ? 0 : 1;
   // 星期表头
   let headHtml = '';
@@ -290,25 +319,39 @@ function renderCalendar() {
       </div>`;
     }
 
+    // 休息日 / 调休上班日标记
+    const holi = holidayOf(ds);
+    const hp = holidayPrefsLocal();
+    let holiBadge = '';
+    let holiClass = '';
+    if (holi && holi.type === 'off' && hp.showRest) {
+      holiBadge = `<span class="holi-badge off" title="${esc((holi.name ? holi.name + ' ' : '') + '放假休息')}">休</span>`;
+      holiClass = ' is-holiday';
+    } else if (holi && holi.type === 'work' && hp.showWorkday) {
+      holiBadge = `<span class="holi-badge work" title="${esc((holi.name ? holi.name + ' ' : '') + '调休上班')}">班</span>`;
+      holiClass = ' is-workday';
+    }
+
     // 节日与农历
     const fest = festOf(ds);
-    let festLine = '';
+    let festInner = '';
     if (fest) {
       const names = (fest.festivals || []);
       const nameTxt = names.slice(0, 2).join('、') + (names.length > 2 ? `+${names.length - 2}` : '');
       const lunarHtml = fest.lunar ? `<span class="lunar-name">${esc(fest.lunar)}</span>` : '';
       const titleTxt = `${names.join('、')}${fest.lunarFull ? (names.length ? ' · ' : '') + fest.lunarFull : ''}`;
       if (nameTxt) {
-        festLine = `<div class="cell-fest" title="${esc(titleTxt)}"><span class="fest-name">${esc(nameTxt)}</span>${lunarHtml}</div>`;
+        festInner = `<span class="fest-name" title="${esc(titleTxt)}">${esc(nameTxt)}</span>${lunarHtml}`;
       } else if (lunarHtml) {
-        festLine = `<div class="cell-fest" title="${esc(titleTxt)}">${lunarHtml}</div>`;
+        festInner = lunarHtml;
       }
     }
+    const festRow = (holiBadge || festInner) ? `<div class="cell-fest">${holiBadge}${festInner}</div>` : '';
 
-    html += `<div class="day-cell ${inMonth ? '' : 'outside'} ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''} ${act ? 'has-liquid' : ''}" data-date="${ds}">
+    html += `<div class="day-cell ${inMonth ? '' : 'outside'} ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''} ${act ? 'has-liquid' : ''}${holiClass}" data-date="${ds}">
       ${liquid}
       <div class="day-num">${d.getDate()}</div>
-      ${festLine}
+      ${festRow}
       ${dayImgUrls[ds] ? `<img class="cell-img" src="${dayImgUrls[ds]}" alt="" />` : ''}
       ${cellTasks ? `<div class="cell-tasks">${cellTasks}</div>` : ''}
       ${segLine}
@@ -1119,6 +1162,8 @@ $('#btnSettings').addEventListener('click', async () => {
   } catch (e) { $('#sAutoStart').checked = false; }
   renderThemeUI();
   updateBgBtns();
+  updateSoundUI();
+  await updateHolidayUI();
   await renderFestivalUI();
   await renderPluginList();
   $('#settingsModal').hidden = false;
@@ -1129,6 +1174,158 @@ $('#sAutoStart').addEventListener('change', async (e) => {
   } catch (err) {
     alert('设置开机自启失败：' + (err && err.message ? err.message : '未知错误'));
   }
+});
+
+// ---------- 自定义提醒语音 ----------
+// 主进程到点后发来播放指令：播放自选音频 +（可选）系统 TTS 朗读
+window.api.onAlertVoice((p) => {
+  try {
+    if (p && p.file) {
+      window.api.soundPath(p.file).then((r) => {
+        if (r && r.ok) {
+          const a = new Audio(r.url);
+          a.volume = typeof p.volume === 'number' ? Math.max(0, Math.min(1, p.volume)) : 0.8;
+          const pr = a.play();
+          if (pr && pr.catch) pr.catch((e) => console.error('播放提醒语音失败', e));
+        }
+      });
+    }
+    if (p && p.speak && 'speechSynthesis' in window) {
+      try {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(p.text || '提醒');
+        u.lang = 'zh-CN';
+        speechSynthesis.speak(u);
+      } catch (e) {
+        console.error('语音朗读失败', e);
+      }
+    }
+  } catch (e) {
+    console.error('提醒语音处理失败', e);
+  }
+});
+
+const DEFAULT_SOUND = { mode: 'system', file: null, volume: 0.8, speak: false, speakText: '' };
+
+function soundPrefs() {
+  return Object.assign({}, DEFAULT_SOUND, prefs.alertSound || {});
+}
+
+function updateSoundUI() {
+  const s = soundPrefs();
+  $('#sSoundMode').value = s.mode;
+  const custom = s.mode === 'custom';
+  $('#soundCustomWrap').hidden = !custom;
+  $('#soundName').textContent = s.file ? `已选择音频：${s.file}` : '尚未选择音频文件（选好后到点会播放它）';
+  $('#btnPreviewSound').hidden = !s.file;
+  $('#btnClearSound').hidden = !s.file;
+  $('#btnPickSound').textContent = s.file ? '更换音频文件…' : '选择音频文件…';
+  const vol = Math.round((typeof s.volume === 'number' ? s.volume : 0.8) * 100);
+  $('#sSoundVolume').value = String(vol);
+  $('#sSoundVolumeVal').textContent = `${vol}%`;
+  $('#sSpeak').checked = !!s.speak;
+}
+
+async function saveSoundPrefs(patch) {
+  prefs.alertSound = Object.assign(soundPrefs(), patch);
+  await window.api.setPrefs({ alertSound: prefs.alertSound });
+  updateSoundUI();
+}
+
+$('#sSoundMode').addEventListener('change', (e) => saveSoundPrefs({ mode: e.target.value }));
+$('#btnPickSound').addEventListener('click', async () => {
+  const r = await window.api.pickSound();
+  if (!r || !r.ok) return;
+  await saveSoundPrefs({ file: r.fileName, mode: 'custom' });
+});
+$('#btnClearSound').addEventListener('click', () => saveSoundPrefs({ file: null, mode: 'system' }));
+$('#btnPreviewSound').addEventListener('click', async () => {
+  const s = soundPrefs();
+  if (!s.file) return;
+  const r = await window.api.soundPath(s.file);
+  if (r && r.ok) {
+    const a = new Audio(r.url);
+    a.volume = typeof s.volume === 'number' ? s.volume : 0.8;
+    a.play().catch(() => {});
+  }
+});
+$('#sSoundVolume').addEventListener('input', (e) => {
+  $('#sSoundVolumeVal').textContent = `${e.target.value}%`;
+});
+$('#sSoundVolume').addEventListener('change', (e) => saveSoundPrefs({ volume: Number(e.target.value) / 100 }));
+$('#sSpeak').addEventListener('change', (e) => saveSoundPrefs({ speak: e.target.checked }));
+
+// ---------- 节假日设置 ----------
+async function updateHolidayUI() {
+  const hp = holidayPrefsLocal();
+  $('#sHoliRest').checked = hp.showRest !== false;
+  $('#sHoliWork').checked = hp.showWorkday !== false;
+  try {
+    const st = await window.api.getHolidayStatus();
+    const years = (st && st.years) || [];
+    const when = st && st.updatedAt ? new Date(st.updatedAt).toLocaleString() : '从未更新';
+    $('#holiStatus').textContent = years.length
+      ? `已载入 ${years.join(' / ')} 年，共 ${st.count} 条休息 / 调休数据 · 上次更新：${when}`
+      : '尚未载入数据 —— 点「立即在线更新」获取放假安排';
+  } catch (e) {
+    $('#holiStatus').textContent = '状态读取失败';
+  }
+}
+
+async function saveHolidayPrefs(patch) {
+  prefs.holidays = Object.assign(holidayPrefsLocal(), patch);
+  await window.api.setPrefs({ holidays: prefs.holidays });
+  holidayCache = {};
+  renderCalendar();
+  renderDayPanel();
+}
+
+$('#sHoliRest').addEventListener('change', (e) => saveHolidayPrefs({ showRest: e.target.checked }));
+$('#sHoliWork').addEventListener('change', (e) => saveHolidayPrefs({ showWorkday: e.target.checked }));
+
+$('#btnHoliUpdate').addEventListener('click', async () => {
+  const btn = $('#btnHoliUpdate');
+  btn.disabled = true;
+  btn.textContent = '更新中…';
+  try {
+    const r = await window.api.updateHolidays();
+    const parts = ((r && r.results) || []).map((x) => (x.ok ? `${x.year} 年 ✓（${x.count} 条）` : `${x.year} 年 ✗ ${x.error || ''}`));
+    if (r && r.ok) {
+      holidayCache = {};
+      renderCalendar();
+      renderDayPanel();
+      alert('更新完成：\n' + parts.join('\n'));
+    } else {
+      alert('更新失败：\n' + parts.join('\n') + '\n\n网络不可用时可手动下载 JSON，再用「导入 JSON…」。');
+    }
+  } catch (e) {
+    alert('更新失败：' + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '立即在线更新';
+    updateHolidayUI();
+  }
+});
+
+$('#btnHoliImport').addEventListener('click', async () => {
+  try {
+    const r = await window.api.importHolidays();
+    if (r && r.ok) {
+      holidayCache = {};
+      renderCalendar();
+      renderDayPanel();
+      alert(`导入成功：${r.year} 年，共 ${r.count} 条数据`);
+    } else if (r && r.error) {
+      alert('导入失败：' + r.error);
+    }
+  } catch (e) {
+    alert('导入失败');
+  }
+  updateHolidayUI();
+});
+
+$('#btnHoliDir').addEventListener('click', async () => {
+  try { await window.api.openHolidayDir(); } catch (e) { alert('无法打开数据目录'); }
 });
 
 // ---------- 节日与农历设置 ----------

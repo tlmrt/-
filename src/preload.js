@@ -38,6 +38,22 @@ contextBridge.exposeInMainWorld('api', {
   createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
   openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),
 
+  // ---- 节假日（休息日 / 调休上班日） ----
+  getHolidayStatus: () => ipcRenderer.invoke('holidays:status'),
+  getHolidaysMonth: (year, month) => ipcRenderer.invoke('holidays:month', { year, month }),
+  updateHolidays: () => ipcRenderer.invoke('holidays:update'),
+  importHolidays: () => ipcRenderer.invoke('holidays:import'),
+  openHolidayDir: () => ipcRenderer.invoke('holidays:openDir'),
+
+  // ---- 自定义提醒语音 ----
+  pickSound: () => ipcRenderer.invoke('sound:pick'),
+  soundPath: (fileName) => ipcRenderer.invoke('sound:path', fileName),
+  onAlertVoice: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('alert-voice', handler);
+    return () => ipcRenderer.removeListener('alert-voice', handler);
+  },
+
   // ---- 节日与农历 ----
   getFestivalsMeta: () => ipcRenderer.invoke('festivals:meta'),
   getFestivalsMonth: (year, month) => ipcRenderer.invoke('festivals:month', { year, month }),

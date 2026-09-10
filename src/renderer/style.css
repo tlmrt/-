@@ -791,3 +791,48 @@ body.dragging-widget .day-cell { cursor: grabbing; }
   color: var(--text);
 }
 .fest-item input { accent-color: var(--primary); }
+
+/* ---------- 自定义提醒语音 ---------- */
+.sound-name {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 6px;
+  word-break: break-all;
+}
+.theme-custom select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+
+/* ---------- 节假日 / 休息日标记 ---------- */
+.holi-status {
+  font-size: 12px;
+  color: var(--text-2);
+  background: rgba(var(--primary-rgb), .06);
+  border: 1px solid rgba(var(--primary-rgb), .16);
+  border-radius: 8px;
+  padding: 5px 10px;
+  margin: 6px 0;
+  line-height: 1.6;
+}
+.holi-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: 4px;
+  margin-right: 3px;
+  flex: none;
+}
+.holi-badge.off { background: #ff6b6b; color: #fff; }
+.holi-badge.work { background: #6b7280; color: #fff; }
+.day-cell.is-holiday { background: rgba(255, 107, 107, .07); }
+.day-cell.is-holiday.outside { background: rgba(255, 107, 107, .04); }
+.day-cell.is-workday { background: rgba(107, 114, 128, .07); }
+.day-cell.is-holiday .day-num { color: #d94a4a; }

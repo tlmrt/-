@@ -184,6 +184,18 @@
           <p class="hint">可同时显示多个国家 / 地区的节日；点「管理单个节日」可逐个开关某个节日是否显示。节日与农历数据离线内置，不联网。</p>
         </div>
         <div class="field">
+          <label>节假日 / 休息日（可随政策更新）</label>
+          <label class="inline-check"><input type="checkbox" id="sHoliRest" /> 在日历上标记休息日（休）</label>
+          <label class="inline-check"><input type="checkbox" id="sHoliWork" /> 标记调休上班日（班）</label>
+          <div class="holi-status" id="holiStatus">尚未载入数据</div>
+          <div class="theme-custom">
+            <button type="button" class="ghost-btn small" id="btnHoliUpdate">立即在线更新</button>
+            <button type="button" class="ghost-btn small" id="btnHoliImport">导入 JSON…</button>
+            <button type="button" class="ghost-btn small" id="btnHoliDir">打开数据目录…</button>
+          </div>
+          <p class="hint">放假安排每年由官方发布（含调休），无法自动推算，所以需要「在线更新」：从公开数据集 holiday-cn 下载去年 / 今年 / 明年的安排并保存到本机。网络不通时可先手动下载 JSON，再用「导入 JSON…」。</p>
+        </div>
+        <div class="field">
           <label>每周从哪天开始</label>
           <select id="sWeekStart">
             <option value="1">周一</option>
@@ -192,8 +204,34 @@
         </div>
         <div class="field">
           <label>
-            <input type="checkbox" id="sNotifySound" /> 提醒时播放声音
+            <input type="checkbox" id="sNotifySound" /> 提醒时播放系统提示音
           </label>
+        </div>
+        <div class="field">
+          <label>自定义提醒语音</label>
+          <div class="theme-custom">
+            <select id="sSoundMode">
+              <option value="system">使用系统提示音</option>
+              <option value="custom">播放自定义音频</option>
+            </select>
+          </div>
+          <div id="soundCustomWrap" hidden>
+            <div class="theme-custom" style="margin-top:6px">
+              <button type="button" class="ghost-btn small" id="btnPickSound">选择音频文件…</button>
+              <button type="button" class="ghost-btn small" id="btnPreviewSound" hidden>试听</button>
+              <button type="button" class="ghost-btn small" id="btnClearSound" hidden>移除</button>
+            </div>
+            <div class="sound-name" id="soundName"></div>
+            <div class="opacity-row">
+              <span class="opacity-label">音量</span>
+              <input type="range" id="sSoundVolume" min="0" max="100" value="80" />
+              <span class="opacity-val" id="sSoundVolumeVal">80%</span>
+            </div>
+          </div>
+          <label class="inline-check" style="margin-top:8px">
+            <input type="checkbox" id="sSpeak" /> 同时语音朗读提醒内容（系统 TTS）
+          </label>
+          <p class="hint">支持 mp3 / wav / ogg / m4a / aac / flac。到点提醒时播放你选择的音频（用自定义音频时系统提示音会自动静音，避免两种声音叠加）；勾选语音朗读后还会用系统语音念出「提醒：任务标题」。</p>
         </div>
         <div class="field">
           <label>
