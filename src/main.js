@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const dayjs = require('dayjs');
 const { computeAlertsInWindow } = require('./reminder');
+const { buildMonthFestivals, festivalMeta, normalizeFestivalPrefs, DEFAULT_FESTIVAL_PREFS } = require('./festivals');
 
 const APP_ID = 'cn.evestudio.calendar';
 app.setAppUserModelId(APP_ID);
@@ -28,6 +29,7 @@ let popupWin = null; // 提醒兜底小窗
 let isQuitting = false;
 let tasks = []; // 全部任务
 let prefs = { weekStart: 1, notifySound: true };
+const DEFAULT_FESTIVAL_PREFS = { showLunar: true, countries: ['cn'], hidden: [] };
 let dayImgMap = {}; // { 'YYYY-MM-DD': fileName } 单日贴纸图
 let segments = [];  // 独立时间段 [{id,date,start,end,title,color}]，进行中时该日格子显示液体
 let widgetRecs = []; // 桌面小组件 [{id,date,x,y,alwaysOnTop}]
@@ -279,6 +281,23 @@ ipcMain.handle('tasks:delete', (e, id) => {
   saveTasks();
   broadcastToWidgets('widget:update');
   return { ok: true };
+});
+
+// ---------------- 节日与农历（计算逻辑在 festivals.js，可单测） ----------------
+function festivalPrefs() {
+  return normalizeFestivalPrefs(prefs.festivals);
+}
+
+ipcMain.handle('festivals:meta', () => {
+  const meta = festivalMeta();
+  return { ...meta, prefs: festivalPrefs() };
+});
+
+ipcMain.handle('festivals:month', (e, { year, month }) => {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) return {};
+  return buildMonthFestivals(y, m, festivalPrefs());
 });
 
 // ---------------- 独立时间段 ----------------
@@ -817,6 +836,9 @@ app.whenReady().then(() => {
 
   tasks = (loadJSON(TASKS_FILE(), { tasks: [] }).tasks) || [];
   prefs = { weekStart: 1, notifySound: true, ...loadJSON(PREFS_FILE(), {}) };
+  if (!prefs.festivals || typeof prefs.festivals !== 'object') prefs.festivals = { ...DEFAULT_FESTIVAL_PREFS };
+  if (!Array.isArray(prefs.festivals.countries) || !prefs.festivals.countries.length) prefs.festivals.countries = ['cn'];
+  if (!Array.isArray(prefs.festivals.hidden)) prefs.festivals.hidden = [];
   if (!Array.isArray(tasks)) tasks = [];
   dayImgMap = loadJSON(DAYIMG_FILE(), {});
   if (!dayImgMap || typeof dayImgMap !== 'object' || Array.isArray(dayImgMap)) dayImgMap = {};

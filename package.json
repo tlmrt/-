@@ -7,6 +7,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "test": "node test/reminder.test.js && node test/festivals.test.js",
     "dist": "electron-builder --win"
   },
   "build": {
@@ -51,7 +52,8 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "dayjs": "^1.11.23"
+    "dayjs": "^1.11.23",
+    "lunar-javascript": "^1.7.7"
   },
   "allowScripts": {
     "electron@44.3.0": true,

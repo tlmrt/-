@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('api', {
   createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
   openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),
 
+  // ---- 节日与农历 ----
+  getFestivalsMeta: () => ipcRenderer.invoke('festivals:meta'),
+  getFestivalsMonth: (year, month) => ipcRenderer.invoke('festivals:month', { year, month }),
+
   // ---- 独立时间段（液体效果） ----
   listSegments: () => ipcRenderer.invoke('segments:list'),
   saveSegment: (seg) => ipcRenderer.invoke('segments:save', seg),

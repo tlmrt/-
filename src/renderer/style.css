@@ -730,3 +730,64 @@ body.peek #bgImageLayer.on::after { opacity: .06; }
 #dragGhost[hidden] { display: none; }
 body.dragging-widget { cursor: grabbing; }
 body.dragging-widget .day-cell { cursor: grabbing; }
+
+/* ---------- 节日与农历 ---------- */
+.cell-fest {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+.cell-fest .fest-name { color: #e0554f; font-weight: 600; }
+.cell-fest .lunar-name { color: var(--text-3); }
+.day-cell.outside .cell-fest .fest-name { color: #d99a97; }
+.day-sub { font-size: 12px; color: var(--text-3); font-weight: 500; margin-left: 6px; }
+.day-sub .fest-name { color: #e0554f; font-weight: 600; }
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.inline-check input { accent-color: var(--primary); }
+
+.fest-countries { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.fest-chip {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--text-2);
+  background: #fff;
+  transition: all .12s;
+}
+.fest-chip:hover { border-color: var(--primary); color: var(--primary); }
+.fest-chip.on { border-color: var(--primary); background: var(--primary); color: #fff; }
+
+.fest-group { margin-bottom: 12px; }
+.fest-group h4 {
+  font-size: 12.5px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.fest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  font-size: 13px;
+  color: var(--text);
+}
+.fest-item input { accent-color: var(--primary); }

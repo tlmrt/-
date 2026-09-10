@@ -15,6 +15,9 @@ const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
 // ---------- 状态 ----------
 let tasks = [];
 let dayImgUrls = {}; // { 'YYYY-MM-DD': fileUrl } 单日贴纸图
+let segments = [];   // 独立时间段 [{id,date,start,end,title,color}]
+let festCache = {};  // `${y}-${m}` -> { 'YYYY-MM-DD': { lunar, lunarFull, festivals } }
+const festLoading = {};
 let prefs = { weekStart: 1, notifySound: true };
 let viewY = new Date().getFullYear();
 let viewM = new Date().getMonth();
@@ -212,8 +215,36 @@ function segLabel(s) {
   return `${s.start}-${s.end}`;
 }
 
+// ---------- 节日与农历（按月从主进程取，带缓存） ----------
+function festKey(y, m) { return `${y}-${m}`; }
+
+function ensureFestMonth(y, m) {
+  const key = festKey(y, m);
+  if (festCache[key] || festLoading[key]) return;
+  festLoading[key] = true;
+  window.api.getFestivalsMonth(y, m)
+    .then((map) => { festCache[key] = map || {}; })
+    .catch((e) => { festCache[key] = {}; console.error('节日数据加载失败', e); })
+    .finally(() => {
+      delete festLoading[key];
+      renderCalendar();
+      renderDayPanel();
+    });
+}
+
+function festOf(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  const map = festCache[festKey(y, m)];
+  return map ? map[dateStr] : null;
+}
+
+function clearFestCache() {
+  festCache = {};
+}
+
 // ---------- 渲染月历 ----------
 function renderCalendar() {
+  ensureFestMonth(viewY, viewM + 1); // 懒加载本月节日/农历，加载完自动重绘
   const ws = prefs.weekStart === 0 ? 0 : 1;
   // 星期表头
   let headHtml = '';
@@ -259,9 +290,25 @@ function renderCalendar() {
       </div>`;
     }
 
+    // 节日与农历
+    const fest = festOf(ds);
+    let festLine = '';
+    if (fest) {
+      const names = (fest.festivals || []);
+      const nameTxt = names.slice(0, 2).join('、') + (names.length > 2 ? `+${names.length - 2}` : '');
+      const lunarHtml = fest.lunar ? `<span class="lunar-name">${esc(fest.lunar)}</span>` : '';
+      const titleTxt = `${names.join('、')}${fest.lunarFull ? (names.length ? ' · ' : '') + fest.lunarFull : ''}`;
+      if (nameTxt) {
+        festLine = `<div class="cell-fest" title="${esc(titleTxt)}"><span class="fest-name">${esc(nameTxt)}</span>${lunarHtml}</div>`;
+      } else if (lunarHtml) {
+        festLine = `<div class="cell-fest" title="${esc(titleTxt)}">${lunarHtml}</div>`;
+      }
+    }
+
     html += `<div class="day-cell ${inMonth ? '' : 'outside'} ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''} ${act ? 'has-liquid' : ''}" data-date="${ds}">
       ${liquid}
       <div class="day-num">${d.getDate()}</div>
+      ${festLine}
       ${dayImgUrls[ds] ? `<img class="cell-img" src="${dayImgUrls[ds]}" alt="" />` : ''}
       ${cellTasks ? `<div class="cell-tasks">${cellTasks}</div>` : ''}
       ${segLine}
@@ -354,7 +401,15 @@ function initBgPeek() {
 function renderDayPanel() {
   const dt = dateOf(selectedDate);
   const wd = WEEK_CN[dt.getDay()];
-  $('#dayTitle').innerHTML = `${selectedDate} <span style="color:#9aa1b0;font-size:13px;font-weight:500">周${wd}</span>`;
+  const fest = festOf(selectedDate);
+  let festSub = '';
+  if (fest) {
+    const parts = [];
+    if (fest.festivals && fest.festivals.length) parts.push(`<span class="fest-name">${esc(fest.festivals.join('、'))}</span>`);
+    if (fest.lunarFull) parts.push(esc(fest.lunarFull));
+    if (parts.length) festSub = ` <span class="day-sub">${parts.join(' · ')}</span>`;
+  }
+  $('#dayTitle').innerHTML = `${selectedDate} <span style="color:#9aa1b0;font-size:13px;font-weight:500">周${wd}</span>${festSub}`;
 
   const segs = segmentsOn(selectedDate);
   const list = tasksOn(selectedDate);
@@ -1064,6 +1119,7 @@ $('#btnSettings').addEventListener('click', async () => {
   } catch (e) { $('#sAutoStart').checked = false; }
   renderThemeUI();
   updateBgBtns();
+  await renderFestivalUI();
   await renderPluginList();
   $('#settingsModal').hidden = false;
 });
@@ -1074,6 +1130,94 @@ $('#sAutoStart').addEventListener('change', async (e) => {
     alert('设置开机自启失败：' + (err && err.message ? err.message : '未知错误'));
   }
 });
+
+// ---------- 节日与农历设置 ----------
+let festMeta = null;
+
+async function getFestMeta() {
+  if (festMeta) return festMeta;
+  try {
+    festMeta = await window.api.getFestivalsMeta();
+  } catch (e) {
+    festMeta = { countries: [], lists: {}, prefs: {} };
+  }
+  return festMeta;
+}
+
+async function saveFestivalPrefs(patch) {
+  prefs.festivals = Object.assign({ showLunar: true, countries: ['cn'], hidden: [] }, prefs.festivals || {}, patch);
+  await window.api.setPrefs({ festivals: prefs.festivals });
+  clearFestCache();
+  renderCalendar();
+  renderDayPanel();
+}
+
+async function renderFestivalUI() {
+  const meta = await getFestMeta();
+  const fp = prefs.festivals || { showLunar: true, countries: ['cn'], hidden: [] };
+  $('#sShowLunar').checked = fp.showLunar !== false;
+  const box = $('#festCountries');
+  box.innerHTML = '';
+  (meta.countries || []).forEach((c) => {
+    const on = (fp.countries || []).includes(c.code);
+    const el = document.createElement('div');
+    el.className = 'fest-chip' + (on ? ' on' : '');
+    el.textContent = c.name;
+    el.title = on ? '点击隐藏该国节日' : '点击显示该国节日';
+    el.addEventListener('click', async () => {
+      const cur = new Set(prefs.festivals && prefs.festivals.countries ? prefs.festivals.countries : ['cn']);
+      if (cur.has(c.code)) cur.delete(c.code); else cur.add(c.code);
+      const countries = [...cur];
+      if (!countries.length) { alert('至少保留一个国家 / 地区'); return; }
+      await saveFestivalPrefs({ countries });
+      await renderFestivalUI();
+    });
+    box.appendChild(el);
+  });
+}
+
+$('#sShowLunar').addEventListener('change', async (e) => {
+  await saveFestivalPrefs({ showLunar: e.target.checked });
+});
+
+async function openFestModal() {
+  const meta = await getFestMeta();
+  const fp = prefs.festivals || { showLunar: true, countries: ['cn'], hidden: [] };
+  const wrap = $('#festList');
+  wrap.innerHTML = '';
+  const codes = fp.countries || [];
+  if (!codes.length) {
+    wrap.innerHTML = '<p class="hint">请先选择至少一个国家 / 地区（在设置里点国家标签）。</p>';
+  }
+  codes.forEach((code) => {
+    const c = (meta.countries || []).find((x) => x.code === code);
+    const names = (meta.lists || {})[code] || [];
+    const group = document.createElement('div');
+    group.className = 'fest-group';
+    group.innerHTML = `<h4>${esc(c ? c.name : code)}（${names.length} 个）</h4>`;
+    names.forEach((n) => {
+      const row = document.createElement('label');
+      row.className = 'fest-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !fp.hidden.includes(n);
+      cb.addEventListener('change', async () => {
+        const hidden = new Set((prefs.festivals && prefs.festivals.hidden) || []);
+        if (cb.checked) hidden.delete(n); else hidden.add(n);
+        await saveFestivalPrefs({ hidden: [...hidden] });
+      });
+      const span = document.createElement('span');
+      span.textContent = n;
+      row.appendChild(cb);
+      row.appendChild(span);
+      group.appendChild(row);
+    });
+    wrap.appendChild(group);
+  });
+  $('#festModal').hidden = false;
+}
+
+$('#btnFestManage').addEventListener('click', () => openFestModal());
 
 // ---------- 插件（开源扩展口） ----------
 // 插件目录 userData/plugins/<id>/（plugin.json + renderer.js），渲染层脚本在此页面注入执行
