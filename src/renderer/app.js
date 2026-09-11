@@ -171,9 +171,15 @@ function taskOccursOn(task, dateStr) {
 }
 
 function tasksOn(dateStr) {
+  // 时间段任务不在这里列出：它们由 segmentsOn() 以「时间段卡片 + 液体」的形式展示，避免重复
   return tasks
-    .filter((t) => taskOccursOn(t, dateStr))
+    .filter((t) => taskOccursOn(t, dateStr) && t.segment !== true)
     .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+}
+
+// 某天的全部时间段（含由时间段任务派生的）—— 已经是任务的一部分，直接用 segments 视图
+function segmentsOnTaskList(dateStr) {
+  return tasks.filter((t) => t.segment === true && t.date === dateStr);
 }
 
 // ---------- 时间段（液体效果） ----------
@@ -481,7 +487,10 @@ function renderDayPanel() {
           <button class="mini-btn" data-act="edit" title="编辑">✎</button>
           <button class="mini-btn del" data-act="del" title="删除">🗑</button>
         </span>`;
-      el.querySelector('[data-act="edit"]').addEventListener('click', () => openSegModal(s));
+      el.querySelector('[data-act="edit"]').addEventListener('click', () => {
+        const t = tasks.find((x) => x.id === s.id);
+        openTaskModal(t || null);
+      });
       el.querySelector('[data-act="del"]').addEventListener('click', () => askDeleteSeg(s));
       frag.appendChild(el);
     });
@@ -604,6 +613,15 @@ function openTaskModal(task) {
   }
   renderReminders();
 
+  // 类型（普通任务 / 时间段）与其专属字段
+  const isSeg = !!(task && task.segment);
+  $('#fKind').value = isSeg ? 'segment' : 'task';
+  $('#fSegWrap').hidden = !isSeg;
+  $('#fEndTime').value = isSeg ? (task.endTime || '') : '';
+  $('#fSegColor').value = (isSeg && /^#[0-9a-fA-F]{6}$/.test(String(task.color || '')))
+    ? task.color
+    : ((prefs.theme && prefs.theme.accent) || '#4f6bff');
+
   $('#taskModal').hidden = false;
   // 打开即把光标放进标题：不用点也能直接打字（编辑时全选，方便直接覆盖）
   setTimeout(() => {
@@ -614,6 +632,17 @@ function openTaskModal(task) {
     } catch (e) { /* 忽略 */ }
   }, 30);
 }
+
+// 任务类型切换：时间段时显示结束时间与液体颜色（默认给两小时时长）
+$('#fKind').addEventListener('change', () => {
+  const isSeg = $('#fKind').value === 'segment';
+  $('#fSegWrap').hidden = !isSeg;
+  if (isSeg && !$('#fEndTime').value) {
+    const [h, m] = ($('#fTime').value || '09:00').split(':').map(Number);
+    const end = new Date(2000, 0, 1, (h || 0) + 2, m || 0);
+    $('#fEndTime').value = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
+  }
+});
 
 // 任务弹窗里的「一句话快速填写」：回车解析并填入下面各项
 $('#fQuick').addEventListener('keydown', async (e) => {
@@ -770,11 +799,20 @@ $('#taskForm').addEventListener('submit', async (e) => {
   const time = $('#fTime').value;
   if (!title || !date || !time) return;
   const tags = $('#fTags').value.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean);
+  const isSegment = $('#fKind').value === 'segment';
+  let endTime = '';
+  if (isSegment) {
+    endTime = $('#fEndTime').value || time;
+    if (endTime === time) { alert('时间段的结束时间不能与开始时间相同'); return; }
+  }
   const payload = {
     id: $('#fId').value || undefined,
     title,
     date,
     time,
+    segment: isSegment,
+    endTime: isSegment ? endTime : undefined,
+    color: isSegment ? $('#fSegColor').value : undefined,
     note: $('#fNote').value.trim(),
     tags,
     priority: $('#fPriority').value,
@@ -786,7 +824,7 @@ $('#taskForm').addEventListener('submit', async (e) => {
     })),
   };
   await window.api.saveTask(payload);
-  window.eveBus.emit('eve:task-saved', payload);
+  window.eveBus.emit(isSegment ? 'eve:segment-saved' : 'eve:task-saved', payload);
   closeModal('taskModal');
   await refresh();
   // 保存后选中该日期，直观看到刚建的任务
@@ -819,7 +857,8 @@ $('#confirmYes').addEventListener('click', async () => {
     window.eveBus.emit('eve:task-deleted', deleteTarget.id);
     await refresh();
   } else if (deleteSegTarget) {
-    await window.api.deleteSegment(deleteSegTarget.id);
+    // 时间段现在就是任务，删除走任务通道
+    await window.api.deleteTask(deleteSegTarget.id);
     await refresh();
   }
   $('#confirmWrap').hidden = true;
@@ -871,7 +910,7 @@ function renderWeek() {
 
   html += days.map((d) => {
     const ds = fmtDate(d);
-    const dayTasks = tasks.filter((t) => taskOccursOnDate(t, ds));
+    const dayTasks = tasks.filter((t) => taskOccursOn(t, ds) && t.segment !== true);
     const daySegs = segments.filter((s) => s.date === ds);
     const slots = hours.map((h) => `<div class="wk-slot" data-date="${ds}" data-hour="${h}" style="height:${WEEK_HOUR_H}px"></div>`).join('');
     const segHtml = daySegs.map((s) => {
@@ -1021,60 +1060,10 @@ async function renderImgModal() {
   $('#imgModal').hidden = false;
 }
 
-// ---------- 时间段（液体倒计时）----------
+// ---------- 时间段（已并入任务：在「添加任务」里把类型选成"时间段"）----------
 const SEG_PRESET_COLORS = ['#4f6bff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#ef4444', '#334155'];
 
-function renderSegColors(cur) {
-  const wrap = $('#segColors');
-  wrap.innerHTML = '';
-  SEG_PRESET_COLORS.forEach((c) => {
-    const el = document.createElement('div');
-    el.className = 'theme-swatch' + (c.toLowerCase() === String(cur).toLowerCase() ? ' on' : '');
-    el.style.background = c;
-    el.title = c;
-    el.addEventListener('click', () => {
-      $('#segColor').value = c;
-      renderSegColors(c);
-    });
-    wrap.appendChild(el);
-  });
-}
-
-function openSegModal(seg) {
-  $('#segModalTitle').textContent = seg ? '编辑时间段' : '新建时间段';
-  $('#segId').value = seg ? seg.id : '';
-  $('#segDate').value = seg ? seg.date : selectedDate;
-  const now = new Date();
-  const later = new Date(now.getTime() + 2 * 3600 * 1000);
-  $('#segStart').value = seg ? seg.start : `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  $('#segEnd').value = seg ? seg.end : `${pad(later.getHours())}:${pad(later.getMinutes())}`;
-  $('#segTitle').value = seg ? (seg.title || '') : '';
-  const c = (seg && seg.color) || (prefs.theme && prefs.theme.accent) || '#4f6bff';
-  $('#segColor').value = c;
-  renderSegColors(c);
-  $('#segModal').hidden = false;
-}
-
-$('#btnDaySeg').addEventListener('click', () => openSegModal(null));
-$('#segColor').addEventListener('input', (e) => renderSegColors(e.target.value));
-
-$('#segForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const payload = {
-    id: $('#segId').value || undefined,
-    date: $('#segDate').value,
-    start: $('#segStart').value,
-    end: $('#segEnd').value,
-    title: $('#segTitle').value.trim(),
-    color: $('#segColor').value,
-  };
-  if (!payload.date || !payload.start || !payload.end) return;
-  if (payload.start === payload.end) { alert('开始时间与结束时间不能相同'); return; }
-  await window.api.saveSegment(payload);
-  closeModal('segModal');
-  await refresh();
-  window.eveBus.emit('eve:segment-saved', payload);
-});
+// 时间段的新建/编辑入口已合并到「＋ 添加任务」弹窗（类型 = 时间段）
 
 // ---------- 拖拽日期格子到桌面 → 生成小组件 ----------
 function initWidgetDrag() {

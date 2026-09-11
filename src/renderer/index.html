@@ -47,7 +47,6 @@
           <h3 id="dayTitle"></h3>
           <div class="day-head-actions">
             <button class="icon-btn small" id="btnDayMaa" title="这一天的 MAA 配置（一键长草）">🎮</button>
-            <button class="icon-btn small" id="btnDaySeg" title="给这一天添加时间段（液体倒计时）">⏳</button>
             <button class="icon-btn small" id="btnDayImg" title="给这一天设置图片">📷</button>
             <button class="primary-btn small" id="btnAddTask">＋ 添加任务</button>
           </div>
@@ -84,6 +83,23 @@
           <div class="field">
             <label>时间</label>
             <input type="time" id="fTime" required />
+          </div>
+        </div>
+        <div class="field">
+          <label>类型<span class="info-dot" tabindex="0" role="note" data-tip="普通任务：到点提醒一次。时间段：给一段起止时间安排一件事 —— 日历格子里会显示随时间下降的液体倒计时，周视图里显示为跨时间的色块，提醒设置照常可用。">i</span></label>
+          <select id="fKind">
+            <option value="task">普通任务（到点提醒）</option>
+            <option value="segment">时间段（液体倒计时）</option>
+          </select>
+        </div>
+        <div class="field-row" id="fSegWrap" hidden>
+          <div class="field">
+            <label>结束时间</label>
+            <input type="time" id="fEndTime" />
+          </div>
+          <div class="field">
+            <label>液体颜色</label>
+            <input type="color" id="fSegColor" value="#4f6bff" />
           </div>
         </div>
         <div class="field-row">
@@ -411,50 +427,6 @@
 
   <!-- 拖拽到桌面生成小组件的浮标 -->
   <div id="dragGhost" hidden></div>
-
-  <!-- 时间段弹窗（液体倒计时） -->
-  <div class="modal-mask" id="segModal" hidden>
-    <div class="modal modal-sm">
-      <div class="modal-head">
-        <h3 id="segModalTitle">新建时间段</h3>
-        <button class="icon-btn" data-close="segModal">✕</button>
-      </div>
-      <form id="segForm" autocomplete="off">
-        <input type="hidden" id="segId" />
-        <div class="field">
-          <label>日期</label>
-          <input type="date" id="segDate" required />
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label>开始时间</label>
-            <input type="time" id="segStart" required />
-          </div>
-          <div class="field">
-            <label>结束时间</label>
-            <input type="time" id="segEnd" required />
-          </div>
-        </div>
-        <div class="field">
-          <label>名称（可选）</label>
-          <input type="text" id="segTitle" placeholder="如：专注工作 / 学习 / 运动" maxlength="40" />
-        </div>
-        <div class="field">
-          <label>液体颜色</label>
-          <div class="theme-row" id="segColors"></div>
-          <div class="theme-custom">
-            <input type="color" id="segColor" value="#4f6bff" />
-            <span class="hint">自定义液体颜色</span>
-          </div>
-        </div>
-        <p class="hint">时间段进行中时，该日期的日历格子里会出现液体：剩余时间越多液面越高，随时间流逝逐渐流干，并显示剩余百分比。</p>
-        <div class="modal-foot">
-          <button type="button" class="ghost-btn" data-close="segModal">取消</button>
-          <button type="submit" class="primary-btn">保存</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <!-- 节日显示管理弹窗 -->
   <div class="modal-mask" id="festModal" hidden>

@@ -114,6 +114,7 @@ function saveTasks() {
   } catch (e) {
     console.error('保存任务失败', e);
   }
+  rebuildSegmentsFromTasks(); // 时间段已并入任务，这里同步派生视图
 }
 
 function savePrefs() {
@@ -125,7 +126,104 @@ function savePrefs() {
   }
 }
 
-// ---------------- 独立时间段 / 桌面小组件：持久化 ----------------
+// ---------------- 时间段（已并入任务：segment:true 的任务即为时间段） ----------------
+// segments 现在是「从任务派生的内存视图」：渲染层（日历液体、周视图、小组件）仍然按老结构读取，
+// 但数据源只有 tasks 一处，不再有独立的 segments.json。
+function hhmmOf(v, fb) {
+  return /^\d{1,2}:\d{2}$/.test(String(v == null ? '' : v).trim())
+    ? String(v).trim().padStart(5, '0')
+    : fb;
+}
+
+function rebuildSegmentsFromTasks() {
+  const acc = (prefs.theme && prefs.theme.accent) || '#4f6bff';
+  segments = tasks
+    .filter((t) => t && t.segment === true && t.date && t.time && t.endTime)
+    .map((t) => ({
+      id: t.id,
+      date: t.date,
+      start: t.time,
+      end: t.endTime,
+      title: t.title || '',
+      color: /^#[0-9a-fA-F]{6}$/.test(String(t.color || '')) ? t.color : acc,
+    }));
+  return segments.length;
+}
+
+// 老数据迁移：把独立的 segments.json 转成「时间段任务」（只做一次，旧文件改名留底）
+function migrateSegmentsToTasks() {
+  try {
+    if (!fs.existsSync(SEG_FILE())) return { migrated: 0 };
+    const raw = loadJSON(SEG_FILE(), { segments: [] });
+    const old = Array.isArray(raw && raw.segments) ? raw.segments : [];
+    let n = 0;
+    for (const s of old) {
+      if (!s || !s.date || !s.start) continue;
+      const id = 'seg_' + (s.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)));
+      if (tasks.some((t) => t.id === id)) continue;
+      tasks.push({
+        id,
+        title: String(s.title || '时间段'),
+        date: String(s.date),
+        time: hhmmOf(s.start, '09:00'),
+        endTime: hhmmOf(s.end, hhmmOf(s.start, '09:00')),
+        segment: true,
+        color: /^#[0-9a-fA-F]{6}$/.test(String(s.color || '')) ? s.color : '',
+        repeat: 'none',
+        priority: 'medium',
+        tags: [],
+        note: '',
+        reminders: [],
+        _notifiedKeys: [],
+      });
+      n += 1;
+    }
+    if (n) {
+      saveTasks(); // 顺带重建派生视图
+      console.log(`[migrate] 已把 ${n} 个独立时间段转成「时间段任务」`);
+    }
+    try { fs.renameSync(SEG_FILE(), SEG_FILE() + '.migrated.bak'); } catch (e) { /* 留底失败不影响 */ }
+    return { migrated: n };
+  } catch (e) {
+    console.error('[migrate] 时间段迁移失败', e);
+    return { migrated: 0, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+// 把一条时间段任务写进 tasks（供本地接口 /api/segments 复用）
+function upsertSegmentTask(seg) {
+  if (!seg || !seg.date || !seg.start) return { ok: false, error: '缺少日期或开始时间' };
+  const id = seg.id && tasks.some((t) => t.id === seg.id)
+    ? seg.id
+    : (seg.id || ('seg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)));
+  const endTime = hhmmOf(seg.end, hhmmOf(seg.start, '09:00'));
+  const existing = tasks.find((t) => t.id === id);
+  const base = existing || {
+    id,
+    repeat: 'none',
+    priority: 'medium',
+    tags: [],
+    note: '',
+    reminders: [],
+    _notifiedKeys: [],
+  };
+  const item = sanitizeTask({
+    ...base,
+    id,
+    title: String(seg.title || base.title || '时间段'),
+    date: String(seg.date),
+    time: hhmmOf(seg.start, '09:00'),
+    endTime,
+    segment: true,
+    color: seg.color || base.color || '',
+  });
+  const idx = tasks.findIndex((t) => t.id === id);
+  if (idx >= 0) tasks[idx] = item; else tasks.push(item);
+  saveTasks();
+  broadcastToWidgets('widget:update');
+  return { ok: true, segment: { id, date: item.date, start: item.time, end: item.endTime, title: item.title, color: item.color } };
+}
+
 function saveSegments() {
   try {
     fs.mkdirSync(DATA_DIR(), { recursive: true });
@@ -528,6 +626,16 @@ function sanitizeTask(input) {
       offsetMinutes: Number(r && r.offsetMinutes) || 0,
       action: r && r.action === 'maa' ? 'maa' : 'notify',
     }));
+  }
+  // 时间段任务：time = 开始时间，endTime = 结束时间（结束早于开始视为跨夜），在日历上显示液体倒计时
+  t.segment = t.segment === true;
+  if (t.segment) {
+    t.time = hhmmOf(t.time, '09:00');
+    t.endTime = hhmmOf(t.endTime, t.time);
+    t.color = /^#[0-9a-fA-F]{6}$/.test(String(t.color || '')) ? t.color : '';
+  } else {
+    delete t.endTime;
+    delete t.color;
   }
   return t;
 }
@@ -1259,20 +1367,17 @@ async function handleApiRoute(route, { query, body }) {
     case 'segments.create': {
       const input = body || {};
       if (!input.date || !input.start || !input.end) return bad('缺少 date/start/end');
-      const item = {
-        id: input.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
-        date: String(input.date),
-        start: String(input.start),
-        end: String(input.end),
-        title: String(input.title || ''),
-        color: String(input.color || '#4f6bff'),
-      };
-      const idx = segments.findIndex((s) => s.id === item.id);
-      if (idx >= 0) segments[idx] = item; else segments.push(item);
-      saveSegments();
-      broadcastToWidgets('widget:update');
-      notifyWebhook('segment.saved', { segment: item });
-      return ok({ segment: item });
+      const r = upsertSegmentTask({
+        id: input.id,
+        date: input.date,
+        start: input.start,
+        end: input.end,
+        title: input.title,
+        color: input.color,
+      });
+      if (!r.ok) return bad(r.error || '保存失败');
+      notifyWebhook('segment.saved', { segment: r.segment });
+      return ok({ segment: r.segment });
     }
 
     case 'now': {
@@ -1907,30 +2012,21 @@ ipcMain.handle('maa:pickExe', async () => {  if (!win) return { ok: false };
   return { ok: true, prefs: maaPrefsLocal() };
 });
 
-// ---------------- 独立时间段 ----------------
+// ---------------- 时间段（对外接口保持老结构，内部已是 tasks 的一种） ----------------
 ipcMain.handle('segments:list', () => segments.map((s) => ({ ...s })));
 
 ipcMain.handle('segments:save', (e, seg) => {
-  if (!seg || !seg.date || !seg.start || !seg.end) return { ok: false };
-  const item = {
-    id: seg.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
-    date: String(seg.date),
-    start: String(seg.start),
-    end: String(seg.end),
-    title: String(seg.title || ''),
-    color: String(seg.color || '#4f6bff'),
-  };
-  const idx = segments.findIndex((s) => s.id === item.id);
-  if (idx >= 0) segments[idx] = item; else segments.push(item);
-  saveSegments();
-  broadcastToWidgets('widget:update');
-  return { ok: true, segment: { ...item } };
+  if (!seg || !seg.date || !seg.start || !seg.end) return { ok: false, error: '缺少日期或起止时间' };
+  return upsertSegmentTask(seg);
 });
 
 ipcMain.handle('segments:delete', (e, id) => {
-  segments = segments.filter((s) => s.id !== id);
-  saveSegments();
-  broadcastToWidgets('widget:update');
+  const idx = tasks.findIndex((t) => t.id === id);
+  if (idx >= 0) {
+    tasks.splice(idx, 1);
+    saveTasks();
+    broadcastToWidgets('widget:update');
+  }
   return { ok: true };
 });
 
@@ -2106,6 +2202,7 @@ function reloadFromDisk() {
   if (p && typeof p === 'object') prefs = p;
   segments = (loadJSON(SEG_FILE(), { segments: [] }).segments) || [];
   if (!Array.isArray(segments)) segments = [];
+  rebuildSegmentsFromTasks();
   widgetRecs = (loadJSON(WIDGET_FILE(), { widgets: [] }).widgets) || [];
   if (!Array.isArray(widgetRecs)) widgetRecs = [];
   dayImgMap = loadJSON(DAYIMG_FILE(), {});
@@ -2829,8 +2926,8 @@ app.whenReady().then(() => {
   if (!Array.isArray(tasks)) tasks = [];
   dayImgMap = loadJSON(DAYIMG_FILE(), {});
   if (!dayImgMap || typeof dayImgMap !== 'object' || Array.isArray(dayImgMap)) dayImgMap = {};
-  segments = (loadJSON(SEG_FILE(), { segments: [] }).segments) || [];
-  if (!Array.isArray(segments)) segments = [];
+  migrateSegmentsToTasks();   // 老数据：独立时间段 → 时间段任务（只做一次）
+  rebuildSegmentsFromTasks(); // 时间段视图由任务派生
   widgetRecs = (loadJSON(WIDGET_FILE(), { widgets: [] }).widgets) || [];
   if (!Array.isArray(widgetRecs)) widgetRecs = [];
 
