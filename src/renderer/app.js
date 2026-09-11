@@ -702,21 +702,28 @@ function initSettingsTabs() {
 }
 
 // ---------- 输入框聚焦兜底 ----------
-// 少数环境（远程桌面、安全软件注入、输入法冲突）下点击输入框可能不聚焦，表现为"点不动"。
-// 这里在捕获阶段补一次 focus，保证点了就能打字——不影响正常环境。
+// 少数环境（远程桌面、安全软件注入、输入法冲突）下点击文本输入框可能不聚焦，表现为"点不动"。
+// 注意：只处理「文本类 input / textarea」，且延后一小段时间、确认仍未聚焦才补 focus——
+// select、date/time/color/file/range 这些原生控件点击时会弹自己的 UI，强行 focus 会打断它们。
 function initInputFocusFallback() {
+  const TEXT_TYPES = ['', 'text', 'search', 'url', 'tel', 'email', 'password', 'number'];
   document.addEventListener('mousedown', (e) => {
     const el = e.target;
     if (!el || !el.tagName) return;
     const tag = el.tagName.toLowerCase();
-    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+    if (tag !== 'input' && tag !== 'textarea') return;
+    if (tag === 'input') {
+      const type = String(el.getAttribute('type') || '').toLowerCase();
+      if (!TEXT_TYPES.includes(type)) return;
+    }
     if (el.disabled || el.readOnly) return;
     if (document.activeElement === el) return;
     setTimeout(() => {
-      if (document.contains(el) && document.activeElement !== el) {
-        try { el.focus(); } catch (err) { /* 忽略 */ }
-      }
-    }, 0);
+      if (!document.contains(el)) return;
+      if (document.activeElement === el) return;
+      if (!document.hasFocus()) return;
+      try { el.focus(); } catch (err) { /* 忽略 */ }
+    }, 80);
   }, true);
 }
 
@@ -2227,6 +2234,25 @@ $('#btnMaaAutoDetect').addEventListener('click', () => detectMaa('settings'));
 $('#btnMaaAutoDetectGlobal').addEventListener('click', () => detectMaa('global'));
 
 // ---------- MAA 全局设置（每天定时自动启动） ----------
+function maaGlobalStatusText(d) {
+  const g = d.global || {};
+  const boundDays = Object.keys(d.dateConfigs || {}).length;
+  const last = g.lastRunDate ? `上次自动启动：${g.lastRunDate}` : '尚未自动启动过';
+  return `MAA ${d.maaConfigured ? '已找到：' + (d.exePath || '') : '未配置路径（可点「自动搜索 MAA」）'} · 默认任务名「${d.autoStartTask}」 · ${d.skipIfRunning ? '已在运行则跳过' : '不跳过已运行'} · ${last}`
+    + (boundDays ? ` · 已有 ${boundDays} 天绑定专属配置（优先级更高）` : '')
+    + (d.configError ? ` · 配置读取：${d.configError}` : '');
+}
+
+// 只刷新状态文字：绝不碰输入框与下拉
+// （改完设置若整体重渲染，会把用户正在操作的时间框/下拉重建掉，表现为"点不动、选不了"）
+async function refreshMaaGlobalStatus() {
+  let d = null;
+  try { d = await window.api.maaGlobalGet(); } catch (e) { d = null; }
+  if (!d || !d.ok) { $('#maaGlobalStatus').textContent = '读取失败'; return; }
+  $('#maaGlobalStatus').textContent = maaGlobalStatusText(d);
+}
+
+// 完整渲染：只在打开弹窗时调用
 async function renderMaaGlobal() {
   $('#maaGlobalMsg').textContent = '';
   let d = null;
@@ -2254,12 +2280,7 @@ async function renderMaaGlobal() {
     sel.appendChild(o);
   }
   sel.value = g.configName || '';
-  const boundDays = Object.keys(d.dateConfigs || {}).length;
-  const last = g.lastRunDate ? `上次自动启动：${g.lastRunDate}` : '尚未自动启动过';
-  $('#maaGlobalStatus').textContent =
-    `MAA ${d.maaConfigured ? '已找到：' + (d.exePath || '') : '未配置路径（可点「自动搜索 MAA」）'} · 默认任务名「${d.autoStartTask}」 · ${d.skipIfRunning ? '已在运行则跳过' : '不跳过已运行'} · ${last}`
-    + (boundDays ? ` · 已有 ${boundDays} 天绑定专属配置（优先级更高）` : '')
-    + (d.configError ? ` · 配置读取：${d.configError}` : '');
+  $('#maaGlobalStatus').textContent = maaGlobalStatusText(d);
 }
 
 $('#btnMaaGlobal').addEventListener('click', async () => {
@@ -2268,29 +2289,29 @@ $('#btnMaaGlobal').addEventListener('click', async () => {
 });
 $('#sMaaDaily').addEventListener('change', async (e) => {
   await window.api.maaGlobalSet({ dailyEnabled: e.target.checked });
-  await renderMaaGlobal();
+  await refreshMaaGlobalStatus();
 });
 $('#maaDailyTime').addEventListener('change', async (e) => {
   await window.api.maaGlobalSet({ dailyTime: e.target.value || '08:00' });
-  await renderMaaGlobal();
+  await refreshMaaGlobalStatus();
 });
 $('#maaDailyConfig').addEventListener('change', async (e) => {
   await window.api.maaGlobalSet({ configName: e.target.value });
-  await renderMaaGlobal();
+  await refreshMaaGlobalStatus();
 });
 $('#btnMaaDailyStartNow').addEventListener('click', async () => {
   const r = await window.api.maaStartNow();
   $('#maaGlobalMsg').textContent = (!r || !r.ok)
     ? ('启动失败：' + ((r && r.error) || '未知错误'))
     : (r.skipped ? 'MAA 已在运行，已跳过' : `已启动 MAA（PID ${r.pid}）`);
-  await renderMaaGlobal();
+  await refreshMaaGlobalStatus();
 });
 $('#btnMaaDailyCheck').addEventListener('click', async () => {
   const r = await window.api.maaDailyCheck();
   $('#maaGlobalMsg').textContent = (!r || r.ok === false)
     ? ('执行失败：' + ((r && r.error) || '未知错误'))
     : (r.skipped ? ('未启动：' + r.skipped) : (r.pid ? `已启动 MAA（PID ${r.pid}）` : '已执行检查'));
-  await renderMaaGlobal();
+  await refreshMaaGlobalStatus();
 });
 $('#btnMaaGlobalOpenPanel').addEventListener('click', () => {
   $('#maaGlobalModal').hidden = true;
