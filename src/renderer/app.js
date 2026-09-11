@@ -371,6 +371,23 @@ function renderCalendar() {
 
 // 每秒刷新液面高度与百分比（不整表重绘；状态切换时才重绘）
 let nowTick = Date.now();
+// 周视图液面：每秒只改高度，不重建 DOM（避免打断点击）
+function updateWeekLiquids() {
+  const box = $('#weekView');
+  if (!box || box.hidden) return;
+  const now = Date.now();
+  box.querySelectorAll('.wk-seg').forEach((el) => {
+    const s = segments.find((x) => x.id === el.dataset.seg);
+    const fill = el.querySelector('.wk-seg-fill');
+    if (!s || !fill) return;
+    const { start, end } = segRange(s);
+    let ratio = 1;
+    if (now >= end) ratio = 0;
+    else if (now >= start) ratio = (end - now) / (end - start);
+    fill.style.height = `${(Math.max(0, Math.min(1, ratio)) * 100).toFixed(1)}%`;
+  });
+}
+
 function updateLiquids() {
   nowTick = Date.now();
   let needRerender = false;
@@ -394,6 +411,7 @@ function updateLiquids() {
     }
   });
   if (needRerender) renderCalendar();
+  updateWeekLiquids(); // 周视图里时间段的液面同步下降
 }
 
 // 绑定月历格子点击：用事件委托一次性绑定，DOM 重建也不会失效
@@ -913,12 +931,29 @@ function renderWeek() {
     const dayTasks = tasks.filter((t) => taskOccursOn(t, ds) && t.segment !== true);
     const daySegs = segments.filter((s) => s.date === ds);
     const slots = hours.map((h) => `<div class="wk-slot" data-date="${ds}" data-hour="${h}" style="height:${WEEK_HOUR_H}px"></div>`).join('');
+    const nowMs = Date.now();
     const segHtml = daySegs.map((s) => {
-      const top = (hhmmToMin(s.start) / 60) * WEEK_HOUR_H;
-      const endMin = hhmmToMin(s.end);
       const startMin = hhmmToMin(s.start);
+      const endMin = hhmmToMin(s.end);
+      const top = (startMin / 60) * WEEK_HOUR_H;
       const bottom = endMin > startMin ? (endMin / 60) * WEEK_HOUR_H : 24 * WEEK_HOUR_H;
-      return `<div class="wk-seg" style="top:${top}px;height:${Math.max(16, bottom - top)}px;background:${esc(s.color)}22;border-color:${esc(s.color)}">${esc(s.title || '')}</div>`;
+      const h = Math.max(20, bottom - top);
+      // 液体：未开始=满，进行中=按剩余比例下降，已结束=空
+      const st = at(s.date, s.start).getTime();
+      let en = at(s.date, s.end).getTime();
+      if (en <= st) en += 24 * 60 * 60 * 1000;
+      let ratio = 1;
+      let active = false;
+      if (nowMs >= en) ratio = 0;
+      else if (nowMs >= st) { ratio = (en - nowMs) / (en - st); active = true; }
+      const remain = active ? fmtRemain(en - nowMs) : '';
+      return `<div class="wk-seg${active ? ' active' : ''}" data-seg="${esc(s.id)}" style="--lc:${esc(s.color)};top:${top}px;height:${h}px">
+          <div class="wk-seg-fill" style="height:${(ratio * 100).toFixed(1)}%"></div>
+          <div class="wk-seg-body">
+            <span class="wk-seg-title">${esc(s.title || '时间段')}</span>
+            <span class="wk-seg-meta">${esc(s.start)}-${esc(s.end)}${remain ? ' · 剩 ' + esc(remain) : ''}</span>
+          </div>
+        </div>`;
     }).join('');
     const taskHtml = dayTasks.map((t) => {
       const top = (hhmmToMin(t.time) / 60) * WEEK_HOUR_H;
@@ -956,6 +991,13 @@ $('#weekView').addEventListener('click', (e) => {
   const taskEl = e.target.closest('.wk-task');
   if (taskEl) {
     const t = tasks.find((x) => x.id === taskEl.dataset.task);
+    if (t) { selectedDate = t.date; renderDayPanel(); openTaskModal(t); }
+    return;
+  }
+  // 点时间段色块 → 打开对应任务的编辑弹窗
+  const segEl = e.target.closest('.wk-seg');
+  if (segEl) {
+    const t = tasks.find((x) => x.id === segEl.dataset.seg);
     if (t) { selectedDate = t.date; renderDayPanel(); openTaskModal(t); }
     return;
   }
