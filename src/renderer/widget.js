@@ -87,6 +87,12 @@
       el.classList.toggle('sel', s.bg === palette.bg && s.fg === palette.fg && (s.accent || '') === (palette.accent || ''));
     });
 
+    const nameEl = $('#wdPalName');
+    if (nameEl) {
+      const matched = PRESETS.find((s) => s.bg === palette.bg && s.fg === palette.fg && (s.accent || '') === (palette.accent || ''));
+      nameEl.textContent = matched ? `当前：${matched.name}` : '当前：自定义';
+    }
+
     if (save) {
       window.api.widgetSetPalette(wid, palette).catch(() => {});
     }
@@ -106,6 +112,7 @@
     } else {
       box.innerHTML = state.tasks
         .map((t) => `<div class="wd-item ${esc(t.priority || '')}" title="${esc(t.note || '')}">
+            <span class="wd-dot"></span>
             <span class="wd-time">${esc(t.time)}</span>
             <span class="wd-title">${esc(t.title)}</span>
           </div>`)
