@@ -22,12 +22,32 @@ const { parseRelease, shouldNotify, errText, describeNetError } = require('./upd
 const { launchConfig, autostartState } = require('./autostart');
 const { POSTPONE_OPTIONS, normalizePostpone, duePostponed } = require('./postpone');
 const { backupName, buildPayload, parseBackup, pruneList, hasBackupToday, BACKUP_FILE_KEYS } = require('./backup');
+const { normalizeQuiet, inQuietHours, buildQuietSummary } = require('./quiet');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { matchRoute, checkToken, extractToken, parseQuery } = require('./localapi');
 const { renderArgs, normalizeMaaPrefs, normalizeTaskMaa, pickDailyPlan } = require('./maa');
 const { buildEditableQueue, applyTaskPatch } = require('./maaconfig');
+
+// ---------------- 诊断日志（最近 100 条 warn/error，供「诊断信息」面板查看） ----------------
+const diagLog = [];
+const APP_STARTED_AT = Date.now();
+const __origError = console.error.bind(console);
+const __origWarn = console.warn.bind(console);
+function pushDiag(level, args) {
+  try {
+    const text = args.map((a) => {
+      if (typeof a === 'string') return a;
+      if (a instanceof Error) return a.message;
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }).join(' ');
+    diagLog.push(`[${new Date().toLocaleTimeString()}] ${level}: ${text}`.slice(0, 400));
+    if (diagLog.length > 100) diagLog.shift();
+  } catch (e) { /* 忽略 */ }
+}
+console.error = (...args) => { pushDiag('ERROR', args); __origError(...args); };
+console.warn = (...args) => { pushDiag('WARN', args); __origWarn(...args); };
 
 const APP_ID = 'cn.evestudio.calendar';
 app.setAppUserModelId(APP_ID);
@@ -208,9 +228,106 @@ function tick() {
   if (Math.random() < 0.02) cleanupKeys();
   checkPostponed();   // 「稍后提醒」到点重发
   checkMaaFinished(); // MAA 跑完发通知
+  checkQuietEnd();    // 免打扰结束后的汇总
+  checkMorningBrief(); // 每日早报
+}
+
+// ---------------- 免打扰时段 ----------------
+let quietBuffer = [];      // 免打扰期间被静音的提醒
+let quietWasActive = false;
+
+function quietPrefs() {
+  return normalizeQuiet(prefs.quiet);
+}
+
+// 免打扰结束后把期间静音的提醒汇总成一条通知
+function checkQuietEnd() {
+  const active = inQuietHours(quietPrefs(), new Date());
+  if (active) { quietWasActive = true; return; }
+  if (!quietWasActive) return;
+  quietWasActive = false;
+  if (!quietBuffer.length) return;
+  const count = quietBuffer.length;
+  const text = buildQuietSummary(quietBuffer);
+  quietBuffer = [];
+  console.log('[quiet] 免打扰结束，汇总', count, '条被静音的提醒');
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: `免打扰期间有 ${count} 条提醒`,
+        body: text.split('\n').slice(1, 4).join('\n'),
+        silent: true,
+      });
+      n.on('click', () => ensureWindow());
+      n.show();
+    }
+  } catch (e) {
+    console.error('[quiet] 汇总通知失败', e);
+  }
+  notifyWebhook('quiet.summary', { count, items: text });
+  if (win && !win.isDestroyed()) win.webContents.send('quiet:summary', { count, text });
+}
+
+// ---------------- 每日早报 ----------------
+function morningPrefs() {
+  const m = prefs.morning && typeof prefs.morning === 'object' ? prefs.morning : {};
+  const time = /^\d{1,2}:\d{2}$/.test(String(m.time || '').trim()) ? String(m.time).trim().padStart(5, '0') : '08:00';
+  return { enabled: !!m.enabled, time, lastDate: typeof m.lastDate === 'string' ? m.lastDate : '' };
+}
+
+function checkMorningBrief() {
+  try {
+    const mp = morningPrefs();
+    if (!mp.enabled) return;
+    const now = dayjs();
+    const today = now.format('YYYY-MM-DD');
+    if (mp.lastDate === today) return;
+    if (now.isBefore(dayjs(`${today}T${mp.time}:00`))) return;
+
+    const list = tasks
+      .filter((t) => taskOccursOnDate(t, today))
+      .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+    const h = holidaysMap[today];
+    const holiTxt = h
+      ? (h.type === 'work' ? `调休上班${h.name ? '（' + h.name + '）' : ''}` : `休息日${h.name ? '（' + h.name + '）' : ''}`)
+      : '';
+    const segs = segments.filter((s) => s.date === today);
+    const parts = [list.length ? `今天有 ${list.length} 个任务` : '今天没有任务'];
+    if (list.length) parts.push(`最近：${list[0].time} ${list[0].title}`);
+    if (holiTxt) parts.push(holiTxt);
+    if (segs.length) parts.push(`时间段 ${segs.length} 个（${segs[0].start}-${segs[0].end}${segs[0].title ? ' ' + segs[0].title : ''}）`);
+    const body = parts.join(' · ');
+
+    try {
+      if (Notification.isSupported()) {
+        const n = new Notification({ title: `早安 · ${now.format('M月D日')}`, body, silent: true });
+        n.on('click', () => ensureWindow());
+        n.show();
+      }
+    } catch (e) {
+      console.error('[morning] 早报通知失败', e);
+    }
+    prefs.morning = { ...mp, lastDate: today };
+    savePrefs();
+    console.log('[morning] 已发早报：', body);
+    notifyWebhook('morning.brief', { date: today, count: list.length, body });
+    if (win && !win.isDestroyed()) win.webContents.send('morning:brief', { body, count: list.length });
+  } catch (e) {
+    console.error('[morning] 早报失败', e);
+  }
 }
 
 function fireNotification(task, alert) {
+  const quiet = inQuietHours(quietPrefs(), new Date());
+  if (quiet) {
+    quietBuffer.push({
+      title: task.title || '未命名任务',
+      at: dayjs(alert.alertAt).format('MM-DD HH:mm'),
+      taskId: task.id,
+    });
+    if (quietBuffer.length > 50) quietBuffer.shift();
+    console.log('[quiet] 免打扰时段，已静音一条提醒：', task.title);
+  }
   const nowTxt = dayjs(alert.alertAt).format('MM-DD HH:mm');
   const prioTxt = { high: '高', medium: '中', low: '低' }[task.priority] || '';
   const isRepeat = task.repeat && task.repeat !== 'none';
@@ -221,7 +338,7 @@ function fireNotification(task, alert) {
   const snd = alertSoundPrefs();
   const useCustom = snd.mode === 'custom' && !!snd.file;
 
-  if (Notification.isSupported()) {
+  if (!quiet && Notification.isSupported()) {
     const n = new Notification({
       title: task.title || '开源日历',
       body: `${body}${prioTxt ? ' [' + prioTxt + ']' : ''}`,
@@ -245,7 +362,7 @@ function fireNotification(task, alert) {
   maybeStartMaaForTask(task);
 
   // 自定义提醒语音：播放自选音频 +（可选）系统 TTS 朗读任务标题
-  if (useCustom || snd.speak) {
+  if (!quiet && (useCustom || snd.speak)) {
     playAlertVoice({
       file: useCustom ? snd.file : null,
       volume: snd.volume,
@@ -257,8 +374,8 @@ function fireNotification(task, alert) {
   }
 
   // 开发模式（未打包安装）下 Windows 常因应用没有开始菜单快捷方式而静默丢弃 toast，
-  // 一律再弹一个置顶兜底小窗，保证提醒可见
-  if (!app.isPackaged) showPopup(task, alert);
+  // 一律再弹一个置顶兜底小窗，保证提醒可见（免打扰时段除外）
+  if (!quiet && !app.isPackaged) showPopup(task, alert);
 }
 
 // 自定义提醒语音：把播放指令发给渲染层（<audio> 播文件、speechSynthesis 朗读）
@@ -2038,6 +2155,85 @@ ipcMain.handle('backup:list', () => {
 });
 
 ipcMain.handle('backup:create', () => createBackup());
+
+// ---------------- 诊断信息 ----------------
+ipcMain.handle('diag:collect', () => {
+  let pluginCount = 0;
+  try {
+    const dir = PLUGIN_DIR();
+    if (fs.existsSync(dir)) {
+      for (const n of fs.readdirSync(dir)) {
+        if (n.endsWith('.js')) pluginCount += 1;
+        else {
+          try { if (fs.existsSync(path.join(dir, n, 'plugin.json'))) pluginCount += 1; } catch (e) { /* noop */ }
+        }
+      }
+    }
+  } catch (e) { /* noop */ }
+
+  const names = backupNames().sort().reverse();
+  const mp = maaPrefsLocal();
+  const up = updatePrefs();
+  const ap = apiPrefs();
+  const st = maaStatus();
+  const lr = updateState.lastResult;
+  const dataFiles = BACKUP_FILE_KEYS.map((k) => {
+    const p = path.join(DATA_DIR(), k);
+    try {
+      const s = fs.statSync(p);
+      return { name: k, size: s.size, mtime: new Date(s.mtimeMs).toLocaleString() };
+    } catch (e) {
+      return { name: k, size: 0, mtime: '（不存在）' };
+    }
+  });
+
+  return {
+    ok: true,
+    app: {
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: `${process.platform} ${process.arch}`,
+      startedAt: new Date(APP_STARTED_AT).toLocaleString(),
+      uptimeMin: Math.round((Date.now() - APP_STARTED_AT) / 60000),
+    },
+    paths: { data: DATA_DIR(), backups: BACKUP_DIR(), plugins: PLUGIN_DIR() },
+    api: {
+      enabled: ap.enabled,
+      port: ap.port,
+      listening: !!(apiServer && apiServer.listening),
+      tokenSet: !!ap.token,
+      webhook: ap.webhook ? ap.webhook : '（未配置）',
+    },
+    update: {
+      repo: up.repo,
+      autoCheck: up.autoCheck,
+      lastCheck: up.lastCheck ? new Date(up.lastCheck).toLocaleString() : '从未',
+      ignored: up.ignoredVersion || '（无）',
+      lastResult: lr ? (lr.ok ? `成功 · 最新 v${lr.latest}${lr.hasUpdate ? '（有更新）' : '（已最新）'}` : `失败 · ${lr.error || ''}`) : '（无）',
+    },
+    maa: {
+      exePath: mp.exePath || '（未配置）',
+      configured: !!(mp.exePath && fs.existsSync(mp.exePath)),
+      running: !!st.running,
+      runLabel: st.label || '',
+      autoStartTask: mp.autoStartTask,
+      dateBindings: Object.keys(mp.dateConfigs || {}).length,
+      weeklyPlans: Object.keys(mp.weekly || {}).length,
+      dailyEnabled: !!(mp.global || {}).dailyEnabled,
+      dailyTime: (mp.global || {}).dailyTime || '',
+    },
+    backup: { count: names.length, latest: names[0] || '（无）', keep: BACKUP_KEEP, dir: BACKUP_DIR() },
+    plugins: { count: pluginCount },
+    quiet: normalizeQuiet(prefs.quiet),
+    morning: morningPrefs(),
+    dataFiles,
+    counts: { tasks: tasks.length, segments: segments.length, widgets: widgetRecs.length, dayImages: Object.keys(dayImgMap || {}).length },
+    errors: diagLog.slice(-40),
+  };
+});
 
 // 一句话建任务：大脑在 src/nlp.js（纯逻辑），这里只做转发与兜底
 let nlpParser = null;

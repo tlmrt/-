@@ -827,18 +827,150 @@ $('#confirmYes').addEventListener('click', async () => {
   deleteSegTarget = null;
 });
 
+// ---------- 周视图（时间轴） ----------
+let calView = 'month';   // month | week
+const WEEK_HOUR_H = 46;  // 每小时的行高
+
+function hhmmToMin(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ''));
+  if (!m) return 0;
+  return Math.min(23, Number(m[1])) * 60 + Math.min(59, Number(m[2]));
+}
+
+function weekDays() {
+  const ws = Number(prefs.weekStart) === 0 ? 0 : 1;
+  const base = dateOf(selectedDate);
+  const start = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const diff = (start.getDay() - ws + 7) % 7;
+  start.setDate(start.getDate() - diff);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+}
+
+function renderWeek() {
+  const box = $('#weekView');
+  if (!box) return;
+  const days = weekDays();
+  const todayStr = fmtDate(new Date());
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+
+  let html = '<div class="wk-head"><div class="wk-gutter"></div>';
+  html += days.map((d) => {
+    const ds = fmtDate(d);
+    return `<div class="wk-col-head${ds === todayStr ? ' today' : ''}" data-date="${ds}">
+        <div>周${'日一二三四五六'[d.getDay()]}</div>
+        <div class="wk-daynum">${d.getDate()}</div>
+      </div>`;
+  }).join('');
+  html += '</div><div class="wk-body"><div class="wk-gutter">';
+  html += hours.map((h) => `<div class="wk-hour" style="height:${WEEK_HOUR_H}px">${String(h).padStart(2, '0')}:00</div>`).join('');
+  html += '</div>';
+
+  html += days.map((d) => {
+    const ds = fmtDate(d);
+    const dayTasks = tasks.filter((t) => taskOccursOnDate(t, ds));
+    const daySegs = segments.filter((s) => s.date === ds);
+    const slots = hours.map((h) => `<div class="wk-slot" data-date="${ds}" data-hour="${h}" style="height:${WEEK_HOUR_H}px"></div>`).join('');
+    const segHtml = daySegs.map((s) => {
+      const top = (hhmmToMin(s.start) / 60) * WEEK_HOUR_H;
+      const endMin = hhmmToMin(s.end);
+      const startMin = hhmmToMin(s.start);
+      const bottom = endMin > startMin ? (endMin / 60) * WEEK_HOUR_H : 24 * WEEK_HOUR_H;
+      return `<div class="wk-seg" style="top:${top}px;height:${Math.max(16, bottom - top)}px;background:${esc(s.color)}22;border-color:${esc(s.color)}">${esc(s.title || '')}</div>`;
+    }).join('');
+    const taskHtml = dayTasks.map((t) => {
+      const top = (hhmmToMin(t.time) / 60) * WEEK_HOUR_H;
+      return `<div class="wk-task ${esc(t.priority || '')}" data-task="${esc(t.id)}" title="${esc(t.time + ' ' + t.title)}" style="top:${top}px">${esc(t.time)} ${esc(t.title)}</div>`;
+    }).join('');
+    return `<div class="wk-col" data-date="${ds}">${slots}${segHtml}${taskHtml}</div>`;
+  }).join('');
+  html += '</div>';
+  box.innerHTML = html;
+
+  const days2 = weekDays();
+  const a = days2[0];
+  const b = days2[6];
+  $('#monthTitle').textContent = `${a.getMonth() + 1}月${a.getDate()}日 – ${b.getMonth() + 1}月${b.getDate()}日`;
+}
+
+function setCalView(v) {
+  calView = v === 'week' ? 'week' : 'month';
+  const isWeek = calView === 'week';
+  $('#weekView').hidden = !isWeek;
+  $('#calHead').hidden = isWeek;
+  $('#calGrid').hidden = isWeek;
+  $('#btnViewMonth').classList.toggle('active', !isWeek);
+  $('#btnViewWeek').classList.toggle('active', isWeek);
+  $('#btnPrev').title = isWeek ? '上一周' : '上个月';
+  $('#btnNext').title = isWeek ? '下一周' : '下个月';
+  if (isWeek) renderWeek(); else { renderCalendar(); bindCalEvents(); }
+}
+
+$('#btnViewMonth').addEventListener('click', () => setCalView('month'));
+$('#btnViewWeek').addEventListener('click', () => setCalView('week'));
+
+// 周视图交互：点空白建任务、点任务块编辑
+$('#weekView').addEventListener('click', (e) => {
+  const taskEl = e.target.closest('.wk-task');
+  if (taskEl) {
+    const t = tasks.find((x) => x.id === taskEl.dataset.task);
+    if (t) { selectedDate = t.date; renderDayPanel(); openTaskModal(t); }
+    return;
+  }
+  const head = e.target.closest('.wk-col-head');
+  if (head) {
+    selectedDate = head.dataset.date;
+    const d = dateOf(selectedDate);
+    viewY = d.getFullYear(); viewM = d.getMonth();
+    renderWeek(); renderDayPanel();
+    return;
+  }
+  const slot = e.target.closest('.wk-slot');
+  if (slot) {
+    const ds = slot.dataset.date;
+    const hh = Number(slot.dataset.hour);
+    selectedDate = ds;
+    const d = dateOf(ds);
+    viewY = d.getFullYear(); viewM = d.getMonth();
+    openTaskModal(null);
+    $('#fDate').value = ds;
+    $('#fTime').value = `${String(hh).padStart(2, '0')}:00`;
+    renderDayPanel();
+  }
+});
+
 // ---------- 导航按钮 ----------
 $('#btnToday').addEventListener('click', () => {
   const now = new Date();
   viewY = now.getFullYear(); viewM = now.getMonth();
   selectedDate = fmtDate(now);
+  if (calView === 'week') { renderWeek(); renderDayPanel(); return; }
   renderCalendar(); bindCalEvents(); renderDayPanel();
 });
 $('#btnPrev').addEventListener('click', () => {
+  if (calView === 'week') {
+    const d = dateOf(selectedDate);
+    d.setDate(d.getDate() - 7);
+    selectedDate = fmtDate(d);
+    viewY = d.getFullYear(); viewM = d.getMonth();
+    renderWeek(); renderDayPanel();
+    return;
+  }
   viewM--; if (viewM < 0) { viewM = 11; viewY--; }
   renderCalendar(); bindCalEvents();
 });
 $('#btnNext').addEventListener('click', () => {
+  if (calView === 'week') {
+    const d = dateOf(selectedDate);
+    d.setDate(d.getDate() + 7);
+    selectedDate = fmtDate(d);
+    viewY = d.getFullYear(); viewM = d.getMonth();
+    renderWeek(); renderDayPanel();
+    return;
+  }
   viewM++; if (viewM > 11) { viewM = 0; viewY++; }
   renderCalendar(); bindCalEvents();
 });
@@ -1369,6 +1501,7 @@ $('#btnSettings').addEventListener('click', async () => {
   await renderFestivalUI();
   await renderPluginList();
   await updateBackupUI();
+  updateQuietUI();
   $('#settingsSaveHint').textContent = '';
   $('#settingsSaveHint').classList.remove('warn');
   $('#settingsModal').hidden = false;
@@ -2580,6 +2713,115 @@ function initShortcuts() {
   });
 }
 
+// 免打扰时段 / 每日早报
+function updateQuietUI() {
+  const q = (prefs.quiet && typeof prefs.quiet === 'object') ? prefs.quiet : {};
+  const mo = (prefs.morning && typeof prefs.morning === 'object') ? prefs.morning : {};
+  $('#sQuiet').checked = !!q.enabled;
+  $('#quietStart').value = q.start || '23:00';
+  $('#quietEnd').value = q.end || '07:00';
+  $('#quietHint').textContent = q.enabled ? '' : '（未启用）';
+  $('#sMorning').checked = !!mo.enabled;
+  $('#morningTime').value = mo.time || '08:00';
+}
+async function saveQuietPrefs() {
+  prefs.quiet = {
+    enabled: $('#sQuiet').checked,
+    start: $('#quietStart').value || '23:00',
+    end: $('#quietEnd').value || '07:00',
+  };
+  prefs.morning = {
+    enabled: $('#sMorning').checked,
+    time: $('#morningTime').value || '08:00',
+  };
+  await window.api.setPrefs({ quiet: prefs.quiet, morning: prefs.morning });
+  $('#quietHint').textContent = $('#sQuiet').checked ? '' : '（未启用）';
+}
+$('#sQuiet').addEventListener('change', saveQuietPrefs);
+$('#quietStart').addEventListener('change', saveQuietPrefs);
+$('#quietEnd').addEventListener('change', saveQuietPrefs);
+$('#sMorning').addEventListener('change', saveQuietPrefs);
+$('#morningTime').addEventListener('change', saveQuietPrefs);
+
+// ---------- 诊断信息 ----------
+function diagFormat(d) {
+  if (!d || !d.ok) return '诊断信息读取失败';
+  const L = [];
+  const kv = (k, v) => L.push(`${k}：${v}`);
+  L.push('===== 开源日历 诊断信息 =====');
+  L.push(`生成时间：${new Date().toLocaleString()}`);
+  L.push('');
+  L.push('【程序】');
+  kv('版本', `v${d.app.version}（${d.app.packaged ? '安装版' : '开发模式'}）`);
+  kv('运行时', `Electron ${d.app.electron} · Chrome ${d.app.chrome} · Node ${d.app.node}`);
+  kv('系统', d.app.platform);
+  kv('本次启动', `${d.app.startedAt}（已运行 ${d.app.uptimeMin} 分钟）`);
+  L.push('');
+  L.push('【数据】');
+  kv('数据目录', d.paths.data);
+  kv('备份目录', `${d.paths.backups}（${d.backup.count} 份，保留 ${d.backup.keep}）`);
+  kv('最近备份', d.backup.latest);
+  kv('插件目录', d.paths.plugins);
+  kv('插件数量', d.plugins.count);
+  kv('内容统计', `任务 ${d.counts.tasks} · 时间段 ${d.counts.segments} · 小组件 ${d.counts.widgets} · 贴纸图 ${d.counts.dayImages}`);
+  for (const f of d.dataFiles) kv(`  ${f.name}`, `${(f.size / 1024).toFixed(1)} KB · ${f.mtime}`);
+  L.push('');
+  L.push('【本地接口】');
+  kv('开关', d.api.enabled ? '已开启' : '已关闭');
+  kv('端口', `${d.api.port}${d.api.listening ? '（监听中）' : '（未监听）'}`);
+  kv('令牌', d.api.tokenSet ? '已设置' : '未设置');
+  kv('webhook', d.api.webhook);
+  L.push('');
+  L.push('【应用更新】');
+  kv('仓库', d.update.repo);
+  kv('自动检查', d.update.autoCheck ? '开' : '关');
+  kv('上次检查', d.update.lastCheck);
+  kv('检查结果', d.update.lastResult);
+  kv('忽略版本', d.update.ignored);
+  L.push('');
+  L.push('【MAA】');
+  kv('可执行文件', d.maa.exePath);
+  kv('已配置', d.maa.configured ? '是' : '否');
+  kv('运行状态', d.maa.running ? `运行中${d.maa.runLabel ? '（' + d.maa.runLabel + '）' : ''}` : '未运行');
+  kv('默认任务名', d.maa.autoStartTask);
+  kv('每天设置', d.maa.dailyEnabled ? `开 · ${d.maa.dailyTime}` : '关');
+  kv('每周计划', `${d.maa.weeklyPlans} 天单独设置`);
+  kv('日期绑定', `${d.maa.dateBindings} 天`);
+  L.push('');
+  L.push('【提醒】');
+  kv('免打扰', d.quiet.enabled ? `${d.quiet.start} → ${d.quiet.end}` : '未启用');
+  kv('每日早报', d.morning.enabled ? `${d.morning.time} 发送` : '未启用');
+  kv('插件异常', (window.__evePluginErrors && window.__evePluginErrors.length) ? JSON.stringify(window.__evePluginErrors) : '无');
+  L.push('');
+  L.push(`【最近日志（最多 40 条，共 ${d.errors.length} 条）】`);
+  L.push(d.errors.length ? d.errors.join('\n') : '（无 warn / error）');
+  return L.join('\n');
+}
+
+async function openDiag() {
+  $('#diagModal').hidden = false;
+  $('#diagText').textContent = '收集中…';
+  $('#diagHint').textContent = '';
+  let d = null;
+  try { d = await window.api.diagCollect(); } catch (e) { d = null; }
+  const text = diagFormat(d);
+  $('#diagText').textContent = text;
+  $('#diagHint').textContent = d && d.ok ? '排查问题时可直接「复制全部」' : '读取失败';
+  return text;
+}
+$('#btnDiag').addEventListener('click', () => openDiag());
+$('#btnDiagRefresh').addEventListener('click', () => openDiag());
+$('#btnDiagCopy').addEventListener('click', async () => {
+  const text = $('#diagText').textContent || '';
+  try {
+    await navigator.clipboard.writeText(text);
+    $('#diagHint').textContent = '已复制到剪贴板';
+  } catch (e) {
+    $('#diagHint').textContent = '复制失败，可手动全选复制';
+  }
+});
+$('#btnDiagDir').addEventListener('click', () => window.api.openDataDir());
+
 // ---------- 数据备份与恢复 ----------
 async function updateBackupUI() {
   let d = null;
@@ -2832,6 +3074,20 @@ $('#btnFestManage').addEventListener('click', () => openFestModal());
 
 // ---------- 插件（开源扩展口） ----------
 // 插件目录 userData/plugins/<id>/（plugin.json + renderer.js），渲染层脚本在此页面注入执行
+// 插件异常集中记录（诊断面板会显示）
+const pluginErrors = [];
+window.__evePluginErrors = pluginErrors;
+window.addEventListener('error', (e) => {
+  try {
+    const src = (e && (e.filename || '')) || '';
+    // 只记插件脚本抛出的错误（应用自身脚本由控制台处理）
+    if (src && !src.includes('/renderer/')) {
+      pluginErrors.push({ id: 'runtime', name: src.split(/[\\/]/).pop(), error: e && e.message });
+      window.__evePluginErrors = pluginErrors.slice();
+    }
+  } catch (err) { /* 忽略 */ }
+});
+
 async function loadPlugins() {
   let list = [];
   try { list = await window.api.listPlugins(); } catch (e) { console.error('读取插件失败', e); }
@@ -2839,12 +3095,26 @@ async function loadPlugins() {
     if (!p.enabled || !p.rendererUrl) continue;
     await new Promise((resolve) => {
       const s = document.createElement('script');
+      let done = false;
+      const finish = (err) => {
+        if (done) return;
+        done = true;
+        if (err) {
+          pluginErrors.push({ id: p.id, name: p.name, error: String(err) });
+          window.__evePluginErrors = pluginErrors.slice();
+          console.warn('[plugin] 加载异常：', p.id, err);
+        }
+        resolve();
+      };
+      // 5 秒超时：插件文件损坏 / 路径失效时不拖住应用启动
+      const timer = setTimeout(() => finish('加载超时（5 秒）'), 5000);
       s.src = p.rendererUrl;
-      s.onload = () => resolve();
-      s.onerror = () => { console.error('插件加载失败', p.id); resolve(); };
+      s.onload = () => { clearTimeout(timer); finish(null); };
+      s.onerror = () => { clearTimeout(timer); finish('脚本加载失败'); };
       document.head.appendChild(s);
     });
   }
+  if (pluginErrors.length) console.warn(`[plugin] 共 ${pluginErrors.length} 个插件加载/运行异常`);
 }
 
 async function renderPluginList() {
@@ -2930,7 +3200,7 @@ window.api.onFocusTask(async (taskId) => {
 async function refresh() {
   tasks = await window.api.listTasks();
   segments = await window.api.listSegments();
-  renderCalendar();
+  if (calView === 'week') renderWeek(); else { renderCalendar(); bindCalEvents(); }
   renderDayPanel();
 }
 

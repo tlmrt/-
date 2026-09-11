@@ -1,7 +1,12 @@
 // ============================================================
 // 节日与农历计算（纯逻辑，无 electron 依赖，可单测）
 // ============================================================
-const { Solar } = require('lunar-javascript');
+// lunar-javascript 体积不小（lunar.js 约 425KB），首次真正用到农历时再加载，缩短启动时间
+let SolarClass = null;
+function getSolar() {
+  if (!SolarClass) SolarClass = require('lunar-javascript').Solar;
+  return SolarClass;
+}
 const { COUNTRIES, RULES } = require('./festivals-data');
 
 const DEFAULT_FESTIVAL_PREFS = { showLunar: true, countries: ['cn'], hidden: [] };
@@ -19,7 +24,7 @@ function ruleMatches(rule, y, m, d, lunar) {
   if (rule.special === 'chuxi') {
     // 除夕 = 农历腊月最后一天（次日为正月初一）
     if (lunar.getMonth() !== 12) return false;
-    const next = Solar.fromYmd(y, m, d).next(1).getLunar();
+    const next = getSolar().fromYmd(y, m, d).next(1).getLunar();
     return next.getMonth() === 1 && next.getDay() === 1;
   }
   if (rule.solarTerm) return lunar.getJieQi() === rule.solarTerm;
@@ -37,7 +42,7 @@ function buildMonthFestivals(year, month, festivalPrefs) {
   const out = {};
   const days = new Date(year, month, 0).getDate();
   for (let d = 1; d <= days; d++) {
-    const solar = Solar.fromYmd(year, month, d);
+    const solar = getSolar().fromYmd(year, month, d);
     const lunar = solar.getLunar();
     const names = [];
     for (const code of fp.countries) {

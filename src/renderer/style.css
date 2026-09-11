@@ -1290,6 +1290,89 @@ body.dragging-widget .day-cell { cursor: grabbing; }
 .cmd-item .cmd-kind { margin-left: auto; font-size: 11px; color: var(--text-3); white-space: nowrap; padding-left: 8px; }
 .cmd-empty { padding: 18px; text-align: center; color: var(--text-3); font-size: 12.5px; }
 
+/* ---------- 诊断信息 ---------- */
+.diag-pre {
+  font-family: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f7f8fc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0;
+  max-height: 56vh;
+  overflow: auto;
+  color: var(--text);
+}
+
+/* ---------- 周视图（时间轴） ---------- */
+.view-switch { display: flex; gap: 2px; margin-left: 8px; background: rgba(var(--primary-rgb), .08); border-radius: 9px; padding: 2px; }
+.view-btn {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.view-btn.active { background: var(--card); color: var(--primary); font-weight: 700; box-shadow: 0 1px 3px rgba(16, 24, 40, .12); }
+
+.week-view { flex: 1; overflow: auto; min-height: 0; }
+.wk-head {
+  display: grid;
+  grid-template-columns: 54px repeat(7, 1fr);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.wk-col-head { text-align: center; padding: 5px 0 6px; font-size: 11.5px; color: var(--text-2); }
+.wk-col-head.today { color: var(--primary); font-weight: 700; }
+.wk-daynum { font-size: 15px; font-weight: 700; color: var(--text); }
+.wk-col-head.today .wk-daynum { color: var(--primary); }
+.wk-body { display: grid; grid-template-columns: 54px repeat(7, 1fr); }
+.wk-gutter { font-size: 10.5px; color: var(--text-3); }
+.wk-hour { text-align: right; padding-right: 6px; border-top: 1px solid var(--border); line-height: 1.2; }
+.wk-col { position: relative; border-left: 1px solid var(--border); }
+.wk-slot { border-top: 1px solid var(--border); }
+.wk-slot:hover { background: rgba(var(--primary-rgb), .07); cursor: pointer; }
+.wk-task {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 20px;
+  line-height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 11px;
+  background: rgba(var(--primary-rgb), .16);
+  color: var(--primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .08);
+}
+.wk-task.high { background: rgba(255, 90, 95, .18); color: #c0392b; }
+.wk-task.low { background: rgba(54, 179, 126, .16); color: #2b7a5b; }
+.wk-seg {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 5px;
+  border: 1px solid;
+  opacity: .45;
+  font-size: 10.5px;
+  padding: 1px 4px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .modal-foot .ghost-btn.small { margin-right: auto; }
 
 /* ---------- 选项旁的 ⓘ 说明图标（把长段说明收进圆形叹号） ---------- */

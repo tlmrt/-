@@ -18,9 +18,13 @@
       </div>
       <div class="nav">
         <button class="icon-btn" id="btnToday" title="回到今天">今天</button>
-        <button class="icon-btn" id="btnPrev" title="上个月">‹</button>
+        <button class="icon-btn" id="btnPrev" title="上一个">‹</button>
         <h2 class="month-title" id="monthTitle"></h2>
-        <button class="icon-btn" id="btnNext" title="下个月">›</button>
+        <button class="icon-btn" id="btnNext" title="下一个">›</button>
+        <div class="view-switch">
+          <button class="view-btn active" id="btnViewMonth" title="月视图">月</button>
+          <button class="view-btn" id="btnViewWeek" title="周视图（时间轴）">周</button>
+        </div>
       </div>
       <div class="top-actions">
         <button class="icon-btn" id="btnSponsor" title="赞助支持作者">❤</button>
@@ -34,6 +38,7 @@
       <section class="cal-panel">
         <div class="week-head" id="calHead"></div>
         <div class="cal-grid" id="calGrid"></div>
+        <div class="week-view" id="weekView" hidden></div>
       </section>
 
       <!-- 右：选中日任务 -->
@@ -296,6 +301,29 @@
           </label>
         </div>
         <div class="field" data-tab="alert">
+          <label class="inline-check">
+            <input type="checkbox" id="sQuiet" /> 免打扰时段（期间只记录、不打扰）
+            <span class="info-dot" tabindex="0" role="note" data-tip="时段内到点的提醒不弹通知、不响声音，只记一笔；时段结束后会发一条汇总告诉你夜里被静音了哪些提醒。支持跨夜，例如 23:00 到次日 07:00。注意：任务里配的「启动 MAA」与 webhook 推送不受影响，照常执行。">i</span>
+          </label>
+          <div class="opacity-row">
+            <span class="opacity-label">从</span>
+            <input type="time" id="quietStart" value="23:00" />
+            <span class="opacity-label">到</span>
+            <input type="time" id="quietEnd" value="07:00" />
+            <span class="hint" id="quietHint"></span>
+          </div>
+        </div>
+        <div class="field" data-tab="alert">
+          <label class="inline-check">
+            <input type="checkbox" id="sMorning" /> 每日早报（早上汇总今天安排）
+            <span class="info-dot" tabindex="0" role="note" data-tip="到点发一条通知：今天有几个任务、最近一条是几点、今天是否休息日或调休上班、有没有正在进行的时间段。">i</span>
+          </label>
+          <div class="opacity-row">
+            <span class="opacity-label">时间</span>
+            <input type="time" id="morningTime" value="08:00" />
+          </div>
+        </div>
+        <div class="field" data-tab="alert">
           <label>自定义提醒语音<span class="info-dot" tabindex="0" role="note" data-tip="支持 mp3 / wav / ogg / m4a / aac / flac。到点提醒时播放你选的音频（用自定义音频时系统提示音会自动静音，避免两种声音叠加）；勾选语音朗读后还会用系统语音念出「提醒：任务标题」。">i</span></label>
           <div class="theme-custom">
             <select id="sSoundMode">
@@ -346,6 +374,9 @@
           <div class="theme-custom" style="margin-top:6px">
             <select id="backupList" style="flex:1"></select>
             <button type="button" class="ghost-btn small" id="btnBackupRestore">恢复此备份</button>
+          </div>
+          <div class="theme-custom" style="margin-top:6px">
+            <button type="button" class="ghost-btn small" id="btnDiag">诊断信息…<span class="info-dot" tabindex="0" role="note" data-tip="一屏看清运行状态：版本与运行时、数据目录、本地接口、更新检查结果、MAA 路径与计划、备份与插件、数据文件大小，以及最近的错误日志。排查问题时可以直接复制发给我。">i</span></button>
           </div>
         </div>
       </div>
@@ -557,6 +588,26 @@
       <button type="button" class="primary-btn small" id="utUpdate">下载更新</button>
       <button type="button" class="ghost-btn small" id="utLater">稍后</button>
       <button type="button" class="ghost-btn small" id="utIgnore">忽略此版本</button>
+    </div>
+  </div>
+
+  <!-- 诊断信息 -->
+  <div class="modal-mask" id="diagModal" hidden>
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <h3>诊断信息</h3>
+        <button class="icon-btn" data-close="diagModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <pre class="diag-pre" id="diagText">收集中…</pre>
+      </div>
+      <div class="modal-foot">
+        <span class="save-hint" id="diagHint"></span>
+        <button type="button" class="ghost-btn small" id="btnDiagCopy">复制全部</button>
+        <button type="button" class="ghost-btn small" id="btnDiagRefresh">刷新</button>
+        <button type="button" class="ghost-btn small" id="btnDiagDir">打开数据目录</button>
+        <button type="button" class="primary-btn" data-close="diagModal">关闭</button>
+      </div>
     </div>
   </div>
 
