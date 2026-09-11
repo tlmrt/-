@@ -1,3 +1,26 @@
+# 开源日历 v0.1.10
+
+> 仅本机迭代，按要求**暂未上传 GitHub**。
+
+## 🐛 修复：切到周视图后月历仍占着大半个屏幕
+
+**原因**：切换视图用的是 HTML 的 `hidden` 属性，但浏览器对 `[hidden]` 的默认样式**优先级很低** —— 只要元素自身有类设置了 `display`，类选择器就会把它盖掉。月网格有 `.cal-grid { display: grid; flex: 1 }`、表头有 `.week-head { display: grid }`，于是 `hidden` 形同虚设，月历照旧占位，周视图被挤到下面。
+
+**修复**：在样式表里加一条全局规则，让 `hidden` 永远真的隐藏：
+
+```css
+[hidden] { display: none !important; }
+```
+
+这是**系统性问题**，不止周视图：其它用 `hidden` 控制显隐的 flex 元素（例如背景视频声音行、幻灯片配置区）以前也可能"藏不掉"，这一条一起治了。
+
+**实测**（读取切换后的真实布局）：
+- 月模式：`calGrid display=grid 高=664` · `weekView display=none 高=0`
+- 周模式：`calGrid display=none 高=0` · `calHead display=none` · `weekView 高=698`（占满）
+- 切回月：正常复原
+
+---
+
 # 开源日历 v0.1.9
 
 > 仅本机迭代，按要求**暂未上传 GitHub**。

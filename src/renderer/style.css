@@ -21,6 +21,12 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* 带 hidden 的元素必须真的隐藏。
+   浏览器对 [hidden] 的默认样式优先级很低，只要元素自身有类设置了 display
+   （例如 .cal-grid 的 display:grid、.opacity-row 的 display:flex），
+   类选择器就会把它盖掉、元素照样占位——周视图切换后月历仍占满空间就是这个原因。 */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
