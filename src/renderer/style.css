@@ -1151,6 +1151,74 @@ body.dragging-widget .day-cell { cursor: grabbing; }
   cursor: zoom-in;
   display: block;
 }
+/* ---------- 设置面板：左侧分类 + 右侧内容（避免一长条挤在一起） ---------- */
+.modal.settings-modal {
+  width: 780px;
+  height: 78vh;
+  max-height: 78vh;
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "head head"
+    "nav  body"
+    "foot foot";
+  column-gap: 16px;
+  overflow: hidden;
+  padding: 18px 20px 14px;
+}
+.settings-modal .modal-head { grid-area: head; margin-bottom: 10px; }
+.settings-modal .settings-nav {
+  grid-area: nav;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+  padding-right: 10px;
+  overflow-y: auto;
+}
+.settings-tab {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease;
+}
+.settings-tab:hover { background: rgba(var(--primary-rgb), .08); color: var(--text); }
+.settings-tab.active {
+  background: rgba(var(--primary-rgb), .13);
+  color: var(--primary);
+  font-weight: 700;
+}
+.settings-modal .modal-body {
+  grid-area: body;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.settings-modal .modal-foot { grid-area: foot; }
+/* 窗口很窄时退化为顶部横向分类 */
+@media (max-width: 760px) {
+  .modal.settings-modal {
+    width: 100%;
+    height: 86vh;
+    grid-template-columns: 1fr;
+    grid-template-areas: "head" "nav" "body" "foot";
+  }
+  .settings-modal .settings-nav {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0 8px;
+    overflow-x: auto;
+  }
+}
+
 .modal-foot .ghost-btn.small { margin-right: auto; }
 
 /* ---------- 选项旁的 ⓘ 说明图标（把长段说明收进圆形叹号） ---------- */

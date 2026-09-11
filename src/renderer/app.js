@@ -679,6 +679,28 @@ function initInfoTips() {
   window.addEventListener('blur', () => hide());
 }
 
+// ---------- 设置面板：分类切换（外观 / 日历 / 提醒与启动 / 联动与 MAA / 更新与插件） ----------
+let settingsTab = 'look';
+function initSettingsTabs() {
+  const nav = $('#settingsNav');
+  if (!nav) return;
+  const tabs = Array.from(nav.querySelectorAll('.settings-tab'));
+  const body = document.querySelector('#settingsModal .modal-body');
+  const fields = Array.from(body.querySelectorAll('[data-tab]'));
+
+  function show(tab) {
+    settingsTab = tab;
+    tabs.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    fields.forEach((f) => { f.hidden = f.dataset.tab !== tab; });
+    if (body) body.scrollTop = 0;
+  }
+  nav.addEventListener('click', (e) => {
+    const b = e.target.closest('.settings-tab');
+    if (b) show(b.dataset.tab);
+  });
+  show(tabs.some((b) => b.dataset.tab === settingsTab) ? settingsTab : (tabs[0] && tabs[0].dataset.tab) || 'look');
+}
+
 // ---------- 输入框聚焦兜底 ----------
 // 少数环境（远程桌面、安全软件注入、输入法冲突）下点击输入框可能不聚焦，表现为"点不动"。
 // 这里在捕获阶段补一次 focus，保证点了就能打字——不影响正常环境。
@@ -2596,6 +2618,7 @@ async function refresh() {
   initWidgetDrag();
   initInfoTips();            // 选项旁的 ⓘ 说明浮层
   initInputFocusFallback();  // 输入框聚焦兜底
+  initSettingsTabs();        // 设置面板的分类切换
   setInterval(updateLiquids, 1000); // 液体倒计时：每秒刷新液面
   // 桌面小组件双击标题 → 主窗口跳到该日期
   window.api.onFocusDate((dateStr) => {

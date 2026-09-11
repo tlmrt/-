@@ -8,9 +8,11 @@
 </head>
 <body>
   <div class="wd-card" id="wdCard">
+    <div class="wd-bar"></div>
     <div class="wd-head" id="wdHead">
       <div class="wd-date" id="wdDate">—</div>
       <div class="wd-btns">
+        <button id="wdColor" class="wd-btn" title="自定义配色">🎨</button>
         <button id="wdPin" class="wd-btn" title="切换置顶">📌</button>
         <button id="wdClose" class="wd-btn" title="关闭小组件">✕</button>
       </div>
@@ -18,6 +20,21 @@
     <div class="wd-list" id="wdList"></div>
     <div class="wd-foot" id="wdFoot"></div>
     <div class="liquid" id="wdLiquid" hidden><span class="liquid-pct" id="wdPct"></span></div>
+
+    <!-- 配色面板（覆盖在卡片内容上，不改窗口尺寸） -->
+    <div class="wd-palette" id="wdPalette" hidden>
+      <div class="wd-pal-head">
+        <span>小组件配色</span>
+        <button class="wd-btn" id="wdPalClose" title="收起">✕</button>
+      </div>
+      <div class="wd-swatches" id="wdSwatches"></div>
+      <div class="wd-pal-custom">
+        <label>背景 <input type="color" id="wdCustBg" /></label>
+        <label>文字 <input type="color" id="wdCustFg" /></label>
+        <label>强调 <input type="color" id="wdCustAccent" /></label>
+      </div>
+      <div class="wd-pal-tip">点色块即换；用取色器可自由搭配</div>
+    </div>
   </div>
   <script src="widget.js"></script>
 </body>

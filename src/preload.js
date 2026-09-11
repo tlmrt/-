@@ -122,6 +122,7 @@ contextBridge.exposeInMainWorld('api', {
   widgetData: (wid) => ipcRenderer.invoke('widget:data', wid),
   widgetClose: (wid) => ipcRenderer.invoke('widget:close', wid),
   widgetToggleTop: (wid) => ipcRenderer.invoke('widget:toggleTop', wid),
+  widgetSetPalette: (wid, palette) => ipcRenderer.invoke('widget:setPalette', wid, palette),
   widgetFocusMain: (wid) => ipcRenderer.invoke('widget:focusMain', wid),
   onWidgetUpdate: (cb) => {
     const handler = () => cb();

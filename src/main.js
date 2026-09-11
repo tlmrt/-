@@ -1684,9 +1684,22 @@ ipcMain.handle('segments:delete', (e, id) => {
 });
 
 // ---------------- 桌面小组件 ----------------
+// 小组件配色：每个小组件可以有自己的背景 / 文字 / 强调色
+const DEFAULT_WIDGET_PALETTE = { bg: '#ffffff', fg: '#2b3245', accent: '' };
+
+function normalizeWidgetPalette(p) {
+  const o = p && typeof p === 'object' ? p : {};
+  const hex = (v, fb) => (typeof v === 'string' && /^(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\([\d\s.,%]+\))$/.test(v.trim()) ? v.trim() : fb);
+  return {
+    bg: hex(o.bg, DEFAULT_WIDGET_PALETTE.bg),
+    fg: hex(o.fg, DEFAULT_WIDGET_PALETTE.fg),
+    accent: o.accent ? hex(o.accent, '') : '',
+  };
+}
+
 ipcMain.handle('widget:list', () => widgetRecs.map((r) => ({ ...r })));
 
-ipcMain.handle('widget:create', (e, { date, x, y }) => {
+ipcMain.handle('widget:create', (e, { date, x, y, palette }) => {
   if (!date) return { ok: false };
   const rec = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -1694,6 +1707,7 @@ ipcMain.handle('widget:create', (e, { date, x, y }) => {
     x: Number.isFinite(x) ? Math.round(x) : undefined,
     y: Number.isFinite(y) ? Math.round(y) : undefined,
     alwaysOnTop: false,
+    palette: palette ? normalizeWidgetPalette(palette) : { ...DEFAULT_WIDGET_PALETTE },
   };
   widgetRecs.push(rec);
   saveWidgets();
@@ -1701,10 +1715,22 @@ ipcMain.handle('widget:create', (e, { date, x, y }) => {
   return { ok: true, id: rec.id };
 });
 
+ipcMain.handle('widget:setPalette', (e, wid, palette) => {
+  const rec = widgetRecs.find((r) => r.id === wid);
+  if (!rec) return { ok: false };
+  rec.palette = normalizeWidgetPalette(palette);
+  saveWidgets();
+  return { ok: true, palette: rec.palette };
+});
+
 ipcMain.handle('widget:data', (e, wid) => {
   const rec = widgetRecs.find((r) => r.id === wid);
   if (!rec) return null;
-  return { ...widgetDataFor(rec.date), alwaysOnTop: !!rec.alwaysOnTop };
+  return {
+    ...widgetDataFor(rec.date),
+    alwaysOnTop: !!rec.alwaysOnTop,
+    palette: normalizeWidgetPalette(rec.palette),
+  };
 });
 
 ipcMain.handle('widget:close', (e, wid) => {
