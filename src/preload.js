@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
   openPluginDir: () => ipcRenderer.invoke('plugins:openDir'),
   openDataDir: () => ipcRenderer.invoke('app:openDataDir'),
   parseQuickTask: (text) => ipcRenderer.invoke('nlp:parseTask', text),
+  parseDateExpr: (text) => ipcRenderer.invoke('nlp:parseDate', text),
   diagCollect: () => ipcRenderer.invoke('diag:collect'),
   createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
   openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),

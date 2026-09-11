@@ -1,6 +1,6 @@
 {
   "name": "evestudio-calendar",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "开源日历 — 桌面日历与任务到点提醒",
   "main": "src/main.js",
   "author": "EveStudio",
@@ -15,6 +15,7 @@
     "productName": "开源日历",
     "asar": true,
     "compression": "maximum",
+    "afterPack": "build/afterPack.js",
     "electronLanguages": [
       "zh-CN",
       "en-US"

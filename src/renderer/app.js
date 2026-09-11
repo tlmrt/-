@@ -2554,47 +2554,21 @@ function jumpToDate(dateStr, { openEditor } = {}) {
   }
 }
 
-// 从输入里解析"跳到"的目标日期（先用直观规则，稍后可由一句话解析器增强）
-function cmdParseDate(text) {
+// 极常用的三条日期规则走本地同步路径（零延迟），其余交给主进程的解析器
+function cmdParseDateFast(text) {
   const s = String(text || '').trim();
+  if (!s) return null;
   const now = new Date();
   const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  if (!s) return null;
-  if (/^(今天|今日)$/i.test(s)) return fmt(now);
-  if (/^(明天|明日)$/i.test(s)) { const d = new Date(now); d.setDate(d.getDate() + 1); return fmt(d); }
+  if (/^(今天|今日)$/.test(s)) return fmt(now);
+  if (/^(明天|明日)$/.test(s)) { const d = new Date(now); d.setDate(d.getDate() + 1); return fmt(d); }
   if (/^后天$/.test(s)) { const d = new Date(now); d.setDate(d.getDate() + 2); return fmt(d); }
-  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s) || /^(\d{1,2})-(\d{1,2})$/.exec(s);
-  if (m && m.length === 4) {
-    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    return Number.isNaN(d.getTime()) ? null : fmt(d);
-  }
-  if (m && m.length === 3) {
-    const d = new Date(now.getFullYear(), Number(m[1]) - 1, Number(m[2]));
-    if (d < new Date(now.getFullYear(), now.getMonth(), now.getDate())) d.setFullYear(d.getFullYear() + 1);
-    return Number.isNaN(d.getTime()) ? null : fmt(d);
-  }
-  m = /^(\d{1,2})月(\d{1,2})[日号]?$/.exec(s);
-  if (m) {
-    const d = new Date(now.getFullYear(), Number(m[1]) - 1, Number(m[2]));
-    if (d < new Date(now.getFullYear(), now.getMonth(), now.getDate())) d.setFullYear(d.getFullYear() + 1);
-    return Number.isNaN(d.getTime()) ? null : fmt(d);
-  }
-  m = /^(?:周|星期|礼拜)([一二三四五六日天])$/.exec(s);
-  if (m) {
-    const map = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 };
-    const target = map[m[1]];
-    const d = new Date(now);
-    const delta = (target - d.getDay() + 7) % 7;
-    d.setDate(d.getDate() + (delta === 0 ? 7 : delta));
-    return fmt(d);
-  }
   return null;
 }
 
-function cmdBuild(query) {
+function cmdBuild(query, jumpDate) {
   const q = String(query || '').trim();
   const out = [];
-  const jumpDate = cmdParseDate(q);
   if (jumpDate) {
     out.push({ icon: '📅', label: `跳到 ${jumpDate}`, kind: '跳转', run: () => jumpToDate(jumpDate) });
   }
@@ -2662,21 +2636,35 @@ async function cmdRun(i) {
   if (it && typeof it.run === 'function') await it.run();
 }
 
+let cmdQueryToken = 0;
+// 先本地极速渲染，再用主进程的中文解析器兜底（复用 src/nlp.js，不重复实现日期规则）
+async function cmdRefresh(query) {
+  const q = String(query || '').trim();
+  const token = ++cmdQueryToken;
+  const fast = cmdParseDateFast(q);
+  cmdItems = cmdBuild(q, fast);
+  cmdIndex = 0;
+  cmdRender();
+  if (!q || fast) return;
+  let r = null;
+  try { r = await window.api.parseDateExpr(q); } catch (e) { r = null; }
+  if (token !== cmdQueryToken) return;   // 输入已变化，丢弃过期结果
+  if (r && r.date) {
+    cmdItems.unshift({ icon: '📅', label: `跳到 ${r.date}`, kind: '解析', run: () => jumpToDate(r.date) });
+    cmdIndex = 0;
+    cmdRender();
+  }
+}
+
 function openCmdPalette(prefill) {
   $('#cmdModal').hidden = false;
   const input = $('#cmdInput');
   input.value = prefill || '';
-  cmdItems = cmdBuild(input.value);
-  cmdIndex = 0;
-  cmdRender();
+  cmdRefresh(input.value);
   setTimeout(() => input.focus(), 30);
 }
 
-$('#cmdInput').addEventListener('input', (e) => {
-  cmdItems = cmdBuild(e.target.value);
-  cmdIndex = 0;
-  cmdRender();
-});
+$('#cmdInput').addEventListener('input', (e) => cmdRefresh(e.target.value));
 $('#cmdInput').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { e.preventDefault(); if (cmdItems.length) { cmdIndex = (cmdIndex + 1) % cmdItems.length; cmdRender(); } }
   else if (e.key === 'ArrowUp') { e.preventDefault(); if (cmdItems.length) { cmdIndex = (cmdIndex - 1 + cmdItems.length) % cmdItems.length; cmdRender(); } }

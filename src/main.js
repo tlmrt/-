@@ -2249,6 +2249,16 @@ ipcMain.handle('nlp:parseTask', (e, text) => {
     return { ok: false, error: String(err && err.message ? err.message : err) };
   }
 });
+
+// 命令面板用：只解析日期片段（复用同一份中文解析规则，避免渲染层重复实现）
+ipcMain.handle('nlp:parseDate', (e, text) => {
+  if (!nlpParser || typeof nlpParser.parseDateExpr !== 'function') return null;
+  try {
+    return nlpParser.parseDateExpr(String(text || ''), new Date());
+  } catch (err) {
+    return null;
+  }
+});
 ipcMain.handle('app:openDataDir', async () => {
   try {
     await shell.openPath(DATA_DIR());
