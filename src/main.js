@@ -32,6 +32,8 @@ app.setAppUserModelId(APP_ID);
 // 显示名改为「开源日历」，但内部名保持 evestudio-calendar 不变，
 // 以确保用户数据目录（%APPDATA%\evestudio-calendar）在改名前后一致、数据不丢
 app.setName('evestudio-calendar');
+// 允许带声音的媒体自动播放：背景视频开启"播放视频声音"后，重启应用也能直接出声
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 // ---------------- 单实例锁 ----------------
 // 自启 + 手动打开不应同时跑两个进程（否则会双托盘、重复提醒）

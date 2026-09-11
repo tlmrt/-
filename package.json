@@ -1,6 +1,6 @@
 {
   "name": "evestudio-calendar",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "开源日历 — 桌面日历与任务到点提醒",
   "main": "src/main.js",
   "author": "EveStudio",
@@ -13,6 +13,12 @@
   "build": {
     "appId": "cn.evestudio.calendar",
     "productName": "开源日历",
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "directories": {
       "output": "release"
     },
@@ -20,7 +26,11 @@
       "src/**/*",
       "assets/**/*",
       "extras/**/*",
-      "docs/**/*"
+      "docs/**/*",
+      "!node_modules/**/{test,__tests__,tests,example,examples,docs,doc}/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.map",
+      "!node_modules/**/{.github,.vscode,.idea}/**"
     ],
     "win": {
       "target": [

@@ -125,7 +125,7 @@
   <div class="modal-mask" id="settingsModal" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h3>设置</h3>
+        <h3>设置<span class="info-dot" tabindex="0" role="note" data-tip="提醒通过 Windows 系统通知发出，日历窗口最小化或隐藏到托盘也会准时提醒。关闭窗口 = 最小化到托盘（右下角图标），从托盘菜单「退出」才会真正退出。">i</span></h3>
         <button class="icon-btn" data-close="settingsModal">✕</button>
       </div>
       <div class="modal-body">
@@ -134,7 +134,7 @@
           <div class="theme-row" id="themeSwatches"></div>
           <div class="theme-custom">
             <input type="color" id="sAccent" value="#4f6bff" />
-            <label for="sAccent" class="hint">自定义强调色，即时生效</label>
+            <span class="info-dot" tabindex="0" role="note" data-tip="自定义强调色：按钮、选中态、高亮都跟着变。改完立即生效。">i</span>
           </div>
         </div>
         <div class="field">
@@ -142,11 +142,11 @@
           <div class="theme-row" id="themeSwatchesBg"></div>
           <div class="theme-custom">
             <input type="color" id="sAccentBg" value="#f4f6fb" />
-            <label for="sAccentBg" class="hint">自定义背景色（建议选浅色，深色时文字对比度会降低）</label>
+            <span class="info-dot" tabindex="0" role="note" data-tip="自定义日历底色。建议选浅色：深色背景下文字对比度会下降，看久了累眼。">i</span>
           </div>
         </div>
         <div class="field">
-          <label>日历背景（图片或视频，二选一）</label>
+          <label>日历背景（图片或视频，二选一）<span class="info-dot" tabindex="0" role="note" data-tip="播放优先顺序：视频 ＞ 图片幻灯片 ＞ 单张图片。幻灯片随机模式一轮内不重复、播完自动重新洗牌，最多 100 张。拖动「面板透明度」可看清背景（调高=更透）；鼠标移到面板外空白处可暂时虚化面板看全背景。">i</span></label>
           <div class="theme-custom">
             <button type="button" class="ghost-btn small" id="btnPickBg">选择背景图片…</button>
             <button type="button" class="ghost-btn small" id="btnClearBg" hidden>移除图片</button>
@@ -155,7 +155,15 @@
             <button type="button" class="ghost-btn small" id="btnPickVid">选择背景视频…</button>
             <button type="button" class="ghost-btn small" id="btnClearVid" hidden>移除视频</button>
           </div>
-          <div class="vid-fmt">🎬 视频支持格式：<b>MP4</b>（H.264 编码）· <b>WebM</b>（VP9/VP8）· mov 需为 H.264/AAC 编码；会自动静音循环播放</div>
+          <div class="vid-fmt">🎬 视频支持格式：<b>MP4</b>（H.264 编码）· <b>WebM</b>（VP9/VP8）· mov 需为 H.264/AAC 编码；自动循环播放</div>
+          <label class="inline-check" id="videoSoundRow" hidden>
+            <input type="checkbox" id="sVideoSound" /> 播放视频声音
+          </label>
+          <div class="opacity-row" id="videoSoundWrap" hidden>
+            <span class="opacity-label">视频音量</span>
+            <input type="range" id="sVideoVolume" min="0" max="100" value="60" />
+            <span class="opacity-val" id="sVideoVolumeVal">60%</span>
+          </div>
           <div class="field-inner-block">
             <button type="button" class="ghost-btn small" id="btnAddSlides">＋ 幻灯片：添加图片…</button>
             <button type="button" class="ghost-btn small" id="btnClearSlides" hidden>清空</button>
@@ -176,19 +184,17 @@
             <input type="range" id="sBgOpacity" min="0" max="100" value="50" />
             <span class="opacity-val" id="sBgOpacityVal">50%</span>
           </div>
-          <p class="hint">背景播放优先顺序：视频 ＞ 图片幻灯片 ＞ 单张图片。幻灯片随机模式一轮内不重复、播完自动重新洗牌；最多 100 张。拖动「面板透明度」可看清背景（调高=更透）；鼠标移到面板外空白处可暂时虚化面板看全背景。</p>
         </div>
         <div class="field">
-          <label>节日与农历</label>
+          <label>节日与农历<span class="info-dot" tabindex="0" role="note" data-tip="可同时显示多个国家 / 地区的节日；点「管理单个节日」可逐个开关某个节日是否显示。节日与农历数据离线内置，不联网。">i</span></label>
           <label class="inline-check"><input type="checkbox" id="sShowLunar" /> 在日历上显示农历日期</label>
           <div class="fest-countries" id="festCountries"></div>
           <div class="theme-custom">
             <button type="button" class="ghost-btn small" id="btnFestManage">管理单个节日…</button>
           </div>
-          <p class="hint">可同时显示多个国家 / 地区的节日；点「管理单个节日」可逐个开关某个节日是否显示。节日与农历数据离线内置，不联网。</p>
         </div>
         <div class="field">
-          <label>节假日 / 休息日（可随政策更新）</label>
+          <label>节假日 / 休息日（可随政策更新）<span class="info-dot" tabindex="0" role="note" data-tip="放假安排每年由官方发布（含调休），无法自动推算，所以要「在线更新」：从公开数据集 holiday-cn 下载去年 / 今年 / 明年的安排并保存到本机。网络不通时可先手动下载 JSON，再用「导入 JSON…」。">i</span></label>
           <label class="inline-check"><input type="checkbox" id="sHoliRest" /> 在日历上标记休息日（休）</label>
           <label class="inline-check"><input type="checkbox" id="sHoliWork" /> 标记调休上班日（班）</label>
           <div class="holi-status" id="holiStatus">尚未载入数据</div>
@@ -197,10 +203,9 @@
             <button type="button" class="ghost-btn small" id="btnHoliImport">导入 JSON…</button>
             <button type="button" class="ghost-btn small" id="btnHoliDir">打开数据目录…</button>
           </div>
-          <p class="hint">放假安排每年由官方发布（含调休），无法自动推算，所以需要「在线更新」：从公开数据集 holiday-cn 下载去年 / 今年 / 明年的安排并保存到本机。网络不通时可先手动下载 JSON，再用「导入 JSON…」。</p>
         </div>
         <div class="field">
-          <label>外部联动（本地接口 / MAA）</label>
+          <label>外部联动（本地接口 / MAA）<span class="info-dot" tabindex="0" role="note" data-tip="接口地址如 http://127.0.0.1:8765/api/now，请求需带令牌（头 X-Api-Token 或 ?token=）。其它软件可通过接口读取任务、创建任务、控制 MAA 启动/停止；配置 webhook 后，任务到点等事件会 POST 给你指定的地址。接口只监听本机，不影响日历正常使用。">i</span></label>
           <label class="inline-check"><input type="checkbox" id="sApiEnabled" /> 开启本地 HTTP 接口（仅本机 127.0.0.1）</label>
           <div class="theme-custom">
             <span class="opacity-label">端口</span>
@@ -240,25 +245,23 @@
             <div class="field-inner-block" style="margin-top:6px">
               <input type="text" id="maaNewTask" placeholder="添加可选的 MAA 任务名，如 开始唤醒" />
               <button type="button" class="ghost-btn small" id="btnMaaAddTask">添加</button>
+              <span class="info-dot" tabindex="0" role="note" data-tip="这些任务名会出现在「编辑任务 → 到点做什么 → 启动 MAA」的下拉里；点标签可删除。">i</span>
             </div>
             <div class="fest-countries" id="maaTaskChips"></div>
-            <p class="hint" style="margin-top:2px">上面这些任务名会出现在「编辑任务 → 到点时自动启动 MAA」的下拉里；点标签可删除。</p>
             <div class="theme-custom" style="margin-top:6px">
               <button type="button" class="primary-btn small" id="btnMaaStart">启动 MAA</button>
               <button type="button" class="ghost-btn small" id="btnMaaStop">停止 MAA</button>
               <span class="holi-status" id="maaStatus" style="margin:0">MAA 状态未知</span>
             </div>
           </div>
-          <p class="hint">接口地址如 http://127.0.0.1:8765/api/now ，请求需带令牌（头 X-Api-Token 或 ?token=）。其它软件可通过接口读取任务、创建任务、控制 MAA 启动/停止；配置 webhook 后，任务到点等事件会 POST 给你指定的地址。接口只监听本机，不影响日历正常使用。</p>
         </div>
         <div class="field">
-          <label>应用更新（直连 GitHub 仓库）</label>
+          <label>应用更新（直连 GitHub 仓库）<span class="info-dot" tabindex="0" role="note" data-tip="仓库地址由发行方锁定，不可修改，「检查更新」与「⭐ 去仓库点 Star」都用它。更新会连你的仓库读取最新 Release（tag 写版本号如 v0.2.0，安装包名建议含 Setup）。检查或下载失败不影响日历使用，可随时重试或点「打开发布页」手动下载；若提示证书 / 连接失败，通常是本机的 HTTPS 加速器或代理（Steam++、Watt Toolkit、Clash 等）未开启或证书未被信任，打开它再重试，或关掉它让应用直连。">i</span></label>
           <label class="inline-check"><input type="checkbox" id="sAutoUpdate" /> 自动检查更新（启动时与每 6 小时）</label>
           <div class="theme-custom">
             <input type="text" id="updRepo" placeholder="GitHub 仓库：用户名/仓库名" readonly />
             <button type="button" class="ghost-btn small" id="btnUpdSaveRepo" hidden>保存</button>
           </div>
-          <p class="hint">仓库地址已由发行方锁定，不可修改；更新检查与「⭐ 去仓库点 Star」都使用它。</p>
           <div class="holi-status" id="updStatus">当前版本读取中…</div>
           <div class="theme-custom">
             <button type="button" class="ghost-btn small" id="btnUpdCheck">检查更新</button>
@@ -266,7 +269,6 @@
             <button type="button" class="ghost-btn small" id="btnUpdInstall" hidden>运行安装包</button>
             <button type="button" class="ghost-btn small" id="btnUpdPage">打开发布页</button>
           </div>
-          <p class="hint">更新直接连你的 GitHub 仓库读取最新 Release（tag 写版本号如 v0.2.0，安装包名建议含 Setup）。检查或下载失败都不影响日历使用，可随时重试，或点「打开发布页」手动下载。若提示证书 / 连接失败，通常是本机的 HTTPS 加速器或代理（Steam++、Watt Toolkit、Clash 等）未开启或证书未被信任：打开它再重试，或关掉它让应用直连。</p>
         </div>
         <div class="field">
           <label>每周从哪天开始</label>
@@ -281,7 +283,7 @@
           </label>
         </div>
         <div class="field">
-          <label>自定义提醒语音</label>
+          <label>自定义提醒语音<span class="info-dot" tabindex="0" role="note" data-tip="支持 mp3 / wav / ogg / m4a / aac / flac。到点提醒时播放你选的音频（用自定义音频时系统提示音会自动静音，避免两种声音叠加）；勾选语音朗读后还会用系统语音念出「提醒：任务标题」。">i</span></label>
           <div class="theme-custom">
             <select id="sSoundMode">
               <option value="system">使用系统提示音</option>
@@ -304,25 +306,22 @@
           <label class="inline-check" style="margin-top:8px">
             <input type="checkbox" id="sSpeak" /> 同时语音朗读提醒内容（系统 TTS）
           </label>
-          <p class="hint">支持 mp3 / wav / ogg / m4a / aac / flac。到点提醒时播放你选择的音频（用自定义音频时系统提示音会自动静音，避免两种声音叠加）；勾选语音朗读后还会用系统语音念出「提醒：任务标题」。</p>
         </div>
         <div class="field">
           <label>
             <input type="checkbox" id="sAutoStart" /> 开机自动启动（后台静默运行）
+            <span class="info-dot" tabindex="0" role="note" data-tip="勾选后开机进入系统时，日历会在后台（托盘）自动运行、准时提醒但不弹窗口；点托盘图标即可打开界面，取消勾选即关闭。这一项要写入 Windows 启动项，改完请点右下角「保存设置」——保存后会回读系统里的真实状态，并把勾选框纠正成实际状态。">i</span>
           </label>
-          <p class="hint">勾选后，开机进入系统时日历会在后台（托盘）自动运行、准时提醒但不弹窗口；点托盘图标即可打开界面。取消勾选即关闭开机自启。这一项要写入 Windows 启动项，改完请点右下角「保存设置」，保存后会回读系统里的真实状态并把勾选框纠正过来。</p>
         </div>
         <div class="field">
-          <label>插件（开源扩展口）</label>
+          <label>插件（开源扩展口）<span class="info-dot" tabindex="0" role="note" data-tip="写插件很简单：把一个 .js 文件丢进插件目录就是一个插件（文件顶部用注释写名称即可）；也支持「文件夹 + plugin.json」的高级写法。点「插件开发教程」查看完整文档；勾选 / 取消在下次启动时生效。">i</span></label>
           <div id="pluginList"></div>
           <div class="theme-custom">
             <button type="button" class="ghost-btn small" id="btnCreateDemoPlugin">创建示例插件</button>
             <button type="button" class="ghost-btn small" id="btnPluginGuide">插件开发教程</button>
             <button type="button" class="ghost-btn small" id="btnOpenPluginDir">打开插件目录…</button>
           </div>
-          <p class="hint">写插件很简单：把一个 .js 文件丢进插件目录就是一个插件（文件顶部用注释写名称即可）；也支持「文件夹 + plugin.json」的高级写法。点「插件开发教程」查看完整文档；勾选/取消在下次启动时生效。</p>
         </div>
-        <p class="hint">提醒通过 Windows 系统通知发出，日历窗口最小化或隐藏到托盘也会准时提醒。关闭窗口 = 最小化到托盘（右下角图标），从托盘菜单「退出」才会真正退出。</p>
       </div>
       <div class="modal-foot">
         <span class="save-hint" id="settingsSaveHint"></span>
@@ -426,14 +425,15 @@
       </div>
       <div class="modal-body">
         <div class="field">
-          <label class="inline-check"><input type="checkbox" id="sMaaDaily" /> 每天定时自动启动 MAA 并执行任务</label>
+          <label class="inline-check"><input type="checkbox" id="sMaaDaily" /> 每天定时自动启动 MAA 并执行任务
+            <span class="info-dot" tabindex="0" role="note" data-tip="到设定时间后，日历会自动切到你选的这套 MAA 配置并启动 MAA（MAA 内已开启「运行前直接开始」时会自动开跑）。优先级：如果某天在日历右侧 🎮 面板里绑定了专属配置，该天的任务提醒就改用专属配置，本全局设置只在没有专属绑定的日子生效。任务里加了「🎮 启动 MAA」提醒的话到点也会启动；两者都开启时，MAA 已在运行会自动跳过重复启动。">i</span>
+          </label>
           <div class="theme-custom">
             <span class="opacity-label">启动时间</span>
             <input type="time" id="maaDailyTime" />
             <span class="opacity-label">使用配置</span>
             <select id="maaDailyConfig"></select>
           </div>
-          <p class="hint">到设定时间后，日历会自动切到你选择的这套 MAA 配置并启动 MAA（MAA 内已开启「运行前直接开始」时会自动开跑）。<b>优先级说明</b>：如果某天在日历右侧 🎮 面板里绑定了专属配置，那么该天的任务提醒会改用专属配置，本全局设置只在没有专属绑定的日子生效。</p>
         </div>
         <div class="holi-status" id="maaGlobalStatus">读取中…</div>
         <div class="theme-custom">
@@ -443,7 +443,6 @@
           <button type="button" class="ghost-btn small" id="btnMaaGlobalOpenPanel">打开 MAA 任务面板</button>
         </div>
         <div id="maaDetectResultsGlobal" class="detect-list" hidden></div>
-        <p class="hint">提示：任务里加了「🎮 启动 MAA」提醒的话，到点也会启动 MAA；两者都开启时，MAA 已在运行会自动跳过重复启动。</p>
       </div>
       <div class="modal-foot">
         <span class="hint" id="maaGlobalMsg" style="margin-right:auto"></span>
@@ -530,6 +529,9 @@
       <button type="button" class="ghost-btn small" id="utIgnore">忽略此版本</button>
     </div>
   </div>
+
+  <!-- ⓘ 说明浮层（全局单例，由 app.js 定位） -->
+  <div id="infoTip" hidden></div>
 
   <script src="app.js"></script>
 </body>

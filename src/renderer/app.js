@@ -605,6 +605,14 @@ function openTaskModal(task) {
   renderReminders();
 
   $('#taskModal').hidden = false;
+  // 打开即把光标放进标题：不用点也能直接打字（编辑时全选，方便直接覆盖）
+  setTimeout(() => {
+    try {
+      const t = $('#fTitle');
+      t.focus();
+      if (task && t.value) t.select();
+    } catch (e) { /* 忽略 */ }
+  }, 30);
 }
 
 function closeModal(id) {
@@ -617,6 +625,78 @@ document.querySelectorAll('[data-close]').forEach((b) => {
 document.querySelectorAll('.modal-mask').forEach((m) => {
   m.addEventListener('click', (e) => { if (e.target === m) m.hidden = true; });
 });
+
+// ---------- 选项旁的 ⓘ 说明浮层 ----------
+// 用「单例浮层 + 事件委托」实现：既不受弹窗滚动区裁切，DOM 重绘后也不会失效
+function initInfoTips() {
+  const tip = $('#infoTip');
+  if (!tip) return;
+  let current = null;
+
+  function place(dot) {
+    const r = dot.getBoundingClientRect();
+    tip.hidden = false;
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 8) top = Math.max(8, r.top - th - 8);
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  }
+  function show(dot) {
+    const text = dot.getAttribute('data-tip');
+    if (!text) return;
+    current = dot;
+    tip.textContent = text;
+    tip.hidden = false;
+    tip.classList.add('on');
+    place(dot);
+  }
+  function hide() {
+    current = null;
+    tip.classList.remove('on');
+    tip.hidden = true;
+  }
+  const dotOf = (t) => (t && t.closest ? t.closest('.info-dot') : null);
+
+  document.addEventListener('mouseover', (e) => {
+    const d = dotOf(e.target);
+    if (d) { if (d !== current) show(d); } else if (current) hide();
+  });
+  document.addEventListener('focusin', (e) => {
+    const d = dotOf(e.target);
+    if (d) show(d);
+  });
+  document.addEventListener('focusout', () => { if (current) hide(); });
+  document.addEventListener('click', (e) => {
+    const d = dotOf(e.target);
+    if (d) { e.preventDefault(); d.focus(); }
+  });
+  window.addEventListener('scroll', () => { if (current) place(current); }, true);
+  window.addEventListener('resize', () => { if (current) place(current); });
+  window.addEventListener('blur', () => hide());
+}
+
+// ---------- 输入框聚焦兜底 ----------
+// 少数环境（远程桌面、安全软件注入、输入法冲突）下点击输入框可能不聚焦，表现为"点不动"。
+// 这里在捕获阶段补一次 focus，保证点了就能打字——不影响正常环境。
+function initInputFocusFallback() {
+  document.addEventListener('mousedown', (e) => {
+    const el = e.target;
+    if (!el || !el.tagName) return;
+    const tag = el.tagName.toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+    if (el.disabled || el.readOnly) return;
+    if (document.activeElement === el) return;
+    setTimeout(() => {
+      if (document.contains(el) && document.activeElement !== el) {
+        try { el.focus(); } catch (err) { /* 忽略 */ }
+      }
+    }, 0);
+  }, true);
+}
 
 // 添加提醒：直接追加一行（时间/动作在行内选择）
 $('#btnAddReminder').addEventListener('click', () => {
@@ -966,6 +1046,9 @@ async function applyBgMedia() {
         });
         layer.appendChild(bgVideoEl);
       }
+      // 视频声音：默认静音；用户在设置里开启后按设定音量播放
+      bgVideoEl.muted = theme.videoSound !== true;
+      bgVideoEl.volume = Math.max(0, Math.min(1, (Number(theme.videoVolume) || 60) / 100));
       if (bgVideoEl.getAttribute('src') !== r.url) {
         bgVideoEl.setAttribute('src', r.url);
         bgVideoEl.load();
@@ -1036,6 +1119,14 @@ function updateBgBtns() {
   const s = $('#sBgOpacity');
   s.value = String((t.bgOpacity) !== undefined ? t.bgOpacity : 100);
   applyBgOpacity();
+  // 视频声音：只在设置了背景视频时才出现
+  const soundOn = t.videoSound === true;
+  const vol = Number.isFinite(Number(t.videoVolume)) ? Number(t.videoVolume) : 60;
+  $('#videoSoundRow').hidden = !hasVid;
+  $('#sVideoSound').checked = soundOn;
+  $('#videoSoundWrap').hidden = !hasVid || !soundOn;
+  $('#sVideoVolume').value = String(vol);
+  $('#sVideoVolumeVal').textContent = `${vol}%`;
 }
 
 async function saveTheme() {
@@ -1111,6 +1202,31 @@ $('#sBgOpacity').addEventListener('input', async (e) => {
   prefs.theme = Object.assign({}, prefs.theme, { bgOpacity: v });
   await saveTheme();
   applyBgOpacity();
+});
+
+// 背景视频的声音：开关 + 音量（默认静音，避免突然出声）
+$('#sVideoSound').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  prefs.theme = Object.assign({}, prefs.theme, { videoSound: on });
+  $('#videoSoundWrap').hidden = !on;
+  await saveTheme();
+  if (bgVideoEl) {
+    bgVideoEl.muted = !on;
+    bgVideoEl.volume = Math.max(0, Math.min(1, (Number(prefs.theme.videoVolume) || 60) / 100));
+    if (on) {
+      const p = bgVideoEl.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  }
+});
+$('#sVideoVolume').addEventListener('input', (e) => {
+  const v = Number(e.target.value);
+  $('#sVideoVolumeVal').textContent = `${v}%`;
+  prefs.theme = Object.assign({}, prefs.theme, { videoVolume: v });
+  if (bgVideoEl) bgVideoEl.volume = Math.max(0, Math.min(1, v / 100));
+});
+$('#sVideoVolume').addEventListener('change', async () => {
+  await saveTheme();
 });
 
 // ---------- 主题颜色（强调色 + 背景色 双通道） ----------
@@ -2478,6 +2594,8 @@ async function refresh() {
   bindCalEvents();
   initBgPeek();
   initWidgetDrag();
+  initInfoTips();            // 选项旁的 ⓘ 说明浮层
+  initInputFocusFallback();  // 输入框聚焦兜底
   setInterval(updateLiquids, 1000); // 液体倒计时：每秒刷新液面
   // 桌面小组件双击标题 → 主窗口跳到该日期
   window.api.onFocusDate((dateStr) => {

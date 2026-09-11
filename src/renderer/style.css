@@ -330,23 +330,28 @@ input, textarea, select { user-select: text; }
 /* ---------- 弹窗 ---------- */
 .modal-mask {
   position: fixed; inset: 0;
-  background: rgba(23, 28, 45, .35);
-  backdrop-filter: blur(2px);
+  background: rgba(23, 28, 45, .38);
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 留出边距并在窗口很矮时可滚动，保证弹窗里的输入框一定点得到
+     （原先这里还有 backdrop-filter 模糊，在部分显卡/远程桌面下会造成点击命中异常，已去掉） */
+  padding: 14px;
+  overflow: auto;
   z-index: 50;
 }
 .modal-mask[hidden] { display: none; }
 
 .modal {
   width: 460px;
-  max-height: 88vh;
+  max-height: 100%;
   overflow-y: auto;
   background: var(--card);
   border-radius: 16px;
   box-shadow: 0 24px 60px rgba(16, 24, 40, .22);
   padding: 20px 22px 16px;
+  position: relative;
+  z-index: 1;
 }
 
 .modal-head {
@@ -1147,3 +1152,47 @@ body.dragging-widget .day-cell { cursor: grabbing; }
   display: block;
 }
 .modal-foot .ghost-btn.small { margin-right: auto; }
+
+/* ---------- 选项旁的 ⓘ 说明图标（把长段说明收进圆形叹号） ---------- */
+.info-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 50%;
+  border: 1.4px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  font-style: normal;
+  color: var(--text-3);
+  cursor: help;
+  vertical-align: -1px;
+  flex: none;
+  transition: color .15s ease, border-color .15s ease;
+}
+.info-dot:hover,
+.info-dot:focus-visible { color: var(--primary); border-color: var(--primary); outline: none; }
+h3 .info-dot,
+.inline-check .info-dot { margin-left: 6px; }
+#infoTip {
+  position: fixed;
+  z-index: 500;
+  max-width: 320px;
+  background: #1f2430;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.65;
+  padding: 9px 11px;
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .3);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s ease;
+  white-space: normal;
+  word-break: break-word;
+}
+#infoTip.on { opacity: 1; }
+#infoTip[hidden] { display: none; }
