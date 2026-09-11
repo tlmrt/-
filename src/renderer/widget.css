@@ -203,6 +203,39 @@ html, body {
 }
 .wd-pal-tip { font-size: 10.5px; color: var(--wd-soft); line-height: 1.5; }
 
+/* ---------- MAA 监视视图 ---------- */
+.wd-maa { display: flex; flex-direction: column; gap: 5px; height: 100%; }
+.wd-maa-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--wd-fg);
+}
+.wd-maa-state .wd-dot { width: 9px; height: 9px; background: color-mix(in srgb, var(--wd-fg) 26%, transparent); }
+.wd-maa-state .wd-dot.on {
+  background: #36b37e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #36b37e 24%, transparent);
+}
+.wd-maa-state.on { color: #36b37e; }
+.wd-maa-sub { font-size: 11.5px; color: var(--wd-soft); line-height: 1.55; word-break: break-word; }
+.wd-maa-sub.warn { color: #e2604f; }
+.wd-maa-btns { display: flex; gap: 6px; margin-top: auto; }
+.wd-mini {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--wd-line);
+  background: color-mix(in srgb, var(--wd-fg) 6%, transparent);
+  color: var(--wd-fg);
+  cursor: pointer;
+}
+.wd-mini:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.wd-mini.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wd-mini:disabled { opacity: .45; cursor: default; }
+
 /* 液体倒计时 */
 .liquid {
   position: absolute;

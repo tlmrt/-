@@ -64,6 +64,10 @@
       <form id="taskForm" autocomplete="off">
         <input type="hidden" id="fId" />
         <div class="field">
+          <label>一句话快速填写<span class="info-dot" tabindex="0" role="note" data-tip="例：明天下午3点 开会 提前10分钟 / 每周一 9:00 站会 / 10月1日 09:00 出行 提前1天。回车即自动填好下面的日期、时间、重复与提醒，标题里会保留没被识别为时间描述的部分。">i</span></label>
+          <input type="text" id="fQuick" placeholder="如：明天下午3点 开会 提前10分钟（回车自动填写）" />
+        </div>
+        <div class="field">
           <label>标题</label>
           <input type="text" id="fTitle" placeholder="要做什么？" required maxlength="120" />
         </div>
@@ -134,6 +138,7 @@
         <button type="button" class="settings-tab" data-tab="alert">🔔 提醒与启动</button>
         <button type="button" class="settings-tab" data-tab="link">🔌 联动与 MAA</button>
         <button type="button" class="settings-tab" data-tab="misc">🧩 更新与插件</button>
+        <button type="button" class="settings-tab" data-tab="data">🗄 数据备份</button>
       </nav>
       <div class="modal-body">
         <div class="field" data-tab="look">
@@ -258,6 +263,7 @@
             <div class="theme-custom" style="margin-top:6px">
               <button type="button" class="primary-btn small" id="btnMaaStart">启动 MAA</button>
               <button type="button" class="ghost-btn small" id="btnMaaStop">停止 MAA</button>
+              <button type="button" class="ghost-btn small" id="btnMaaWidget">＋ 放一个 MAA 监视到桌面</button>
               <span class="holi-status" id="maaStatus" style="margin:0">MAA 状态未知</span>
             </div>
           </div>
@@ -327,6 +333,19 @@
             <button type="button" class="ghost-btn small" id="btnCreateDemoPlugin">创建示例插件</button>
             <button type="button" class="ghost-btn small" id="btnPluginGuide">插件开发教程</button>
             <button type="button" class="ghost-btn small" id="btnOpenPluginDir">打开插件目录…</button>
+          </div>
+        </div>
+        <div class="field" data-tab="data">
+          <label>数据备份与恢复<span class="info-dot" tabindex="0" role="note" data-tip="应用每天首次启动时会自动把任务 / 设置 / 时间段 / 小组件 / 贴纸图备份成一份 JSON，只保留最近 7 份。恢复会先把当前数据再备份一份，然后覆盖写回并立即生效（不用重启）。所有文件都在本机，不联网。">i</span></label>
+          <div class="holi-status" id="backupStatus">读取中…</div>
+          <div class="theme-custom">
+            <button type="button" class="ghost-btn small" id="btnBackupNow">立即备份</button>
+            <button type="button" class="ghost-btn small" id="btnBackupDir">打开备份目录…</button>
+            <button type="button" class="ghost-btn small" id="btnBackupDataDir">打开数据目录…</button>
+          </div>
+          <div class="theme-custom" style="margin-top:6px">
+            <select id="backupList" style="flex:1"></select>
+            <button type="button" class="ghost-btn small" id="btnBackupRestore">恢复此备份</button>
           </div>
         </div>
       </div>
@@ -450,6 +469,10 @@
           <button type="button" class="ghost-btn small" id="btnMaaGlobalOpenPanel">打开 MAA 任务面板</button>
         </div>
         <div id="maaDetectResultsGlobal" class="detect-list" hidden></div>
+        <div class="field" style="margin-top:10px">
+          <label>每周计划（按星期分别设定，优先于上面的「每天」设置）<span class="info-dot" tabindex="0" role="note" data-tip="勾选某个星期即启用该天的独立计划：到设定时间自动切到指定 MAA 配置并启动。未勾选的星期沿用上面的「每天定时自动启动」设置。适合周末换成剿灭 / 活动本等不同配置。">i</span></label>
+          <div class="maapart" id="maaWeekly"></div>
+        </div>
       </div>
       <div class="modal-foot">
         <span class="hint" id="maaGlobalMsg" style="margin-right:auto"></span>
@@ -534,6 +557,19 @@
       <button type="button" class="primary-btn small" id="utUpdate">下载更新</button>
       <button type="button" class="ghost-btn small" id="utLater">稍后</button>
       <button type="button" class="ghost-btn small" id="utIgnore">忽略此版本</button>
+    </div>
+  </div>
+
+  <!-- 命令面板（Ctrl+K） -->
+  <div class="modal-mask cmd-mask" id="cmdModal" hidden>
+    <div class="modal cmd-modal">
+      <div class="cmd-head">
+        <span class="cmd-icon">⌘</span>
+        <input type="text" id="cmdInput" autocomplete="off"
+          placeholder="搜索任务 / 跳到某天 / 新建任务 …（试试：跳到 10-01、开会、新建 明天下午3点开会）" />
+        <span class="cmd-hint">↑↓ 选择 · Enter 执行 · Esc 关闭</span>
+      </div>
+      <div class="cmd-list" id="cmdList"></div>
     </div>
   </div>
 

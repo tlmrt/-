@@ -20,11 +20,13 @@ const {
 } = require('./holidays');
 const { parseRelease, shouldNotify, errText, describeNetError } = require('./updater');
 const { launchConfig, autostartState } = require('./autostart');
+const { POSTPONE_OPTIONS, normalizePostpone, duePostponed } = require('./postpone');
+const { backupName, buildPayload, parseBackup, pruneList, hasBackupToday, BACKUP_FILE_KEYS } = require('./backup');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { matchRoute, checkToken, extractToken, parseQuery } = require('./localapi');
-const { renderArgs, normalizeMaaPrefs, normalizeTaskMaa } = require('./maa');
+const { renderArgs, normalizeMaaPrefs, normalizeTaskMaa, pickDailyPlan } = require('./maa');
 const { buildEditableQueue, applyTaskPatch } = require('./maaconfig');
 
 const APP_ID = 'cn.evestudio.calendar';
@@ -204,6 +206,8 @@ function tick() {
     saveTasks();
   }
   if (Math.random() < 0.02) cleanupKeys();
+  checkPostponed();   // 「稍后提醒」到点重发
+  checkMaaFinished(); // MAA 跑完发通知
 }
 
 function fireNotification(task, alert) {
@@ -224,7 +228,7 @@ function fireNotification(task, alert) {
       // 用自定义语音时不再播系统提示音，避免两种声音叠在一起
       silent: !prefs.notifySound || useCustom,
     });
-    n.on('click', () => focusTask(task.id));
+    n.on('click', () => showPopup(task, alert, { interactive: true })); // 点通知 → 打开提醒卡片（可「稍后提醒」）
     n.on('failed', () => showPopup(task, alert)); // 系统通知失败 → 兜底小窗
     n.show();
     console.log('[notify] fired', task.id, dayjs(alert.alertAt).format('YYYY-MM-DD HH:mm:ss'), task.title);
@@ -273,8 +277,39 @@ function playAlertVoice(payload) {
 }
 
 // 提醒兜底：置顶小窗，10 秒后自动消失
-function showPopup(task, alert) {
-  try { if (popupWin && !popupWin.isDestroyed()) { popupWin.close(); popupWin = null; } } catch (e) { /* noop */ }
+// ---------------- 提醒卡片（兜底小窗 + 点通知后的交互入口） ----------------
+let popupCtx = null;      // 当前卡片对应的任务
+let postponedList = [];   // 「稍后提醒」队列 [{taskId, minutes, at, label, count}]
+
+function closePopup() {
+  try { if (popupWin && !popupWin.isDestroyed()) popupWin.close(); } catch (e) { /* noop */ }
+  popupWin = null;
+  popupCtx = null;
+}
+
+// 把一条提醒推后 minutes 分钟
+function postponeReminder(taskId, minutes, occKey) {
+  const item = normalizePostpone({ taskId, minutes, at: Date.now() + minutes * 60000, label: occKey || '' }, Date.now());
+  if (!item) return { ok: false, error: '参数不合法' };
+  postponedList.push(item);
+  console.log(`[postpone] 任务 ${taskId} 的提醒推后 ${minutes} 分钟（${new Date(item.at).toLocaleTimeString()}）`);
+  return { ok: true, at: item.at };
+}
+
+// 每次 tick 检查有没有到点的「稍后提醒」
+function checkPostponed() {
+  if (!postponedList.length) return;
+  const { due, rest } = duePostponed(postponedList, Date.now());
+  postponedList = rest;
+  for (const p of due) {
+    const task = tasks.find((t) => t.id === p.taskId);
+    if (!task) continue;
+    fireNotification(task, { alertAt: Date.now(), key: p.label || 'postpone', postponed: p.count + 1 });
+  }
+}
+
+function showPopup(task, alert, opts) {
+  closePopup();
   const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const acc = (prefs.theme && prefs.theme.accent) || '#4f6bff';
   const t = dayjs(alert.alertAt).format('M月D日 HH:mm');
@@ -282,19 +317,43 @@ function showPopup(task, alert) {
   const prioTxt = { high: '高', medium: '中', low: '低' }[task.priority] || '';
   const isRepeat = task.repeat && task.repeat !== 'none';
   const body = task.note ? esc(task.note) : (isRepeat ? '重复任务' : '任务到点啦！');
+  const laterTxt = alert && alert.postponed ? ` · 第 ${alert.postponed} 次稍后` : '';
+  popupCtx = { taskId: task.id, title: task.title, occKey: (alert && alert.key) || '', postponed: (alert && alert.postponed) || 0 };
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>
-    *{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;height:100vh;background:#fff;border-top:4px solid ${acc};padding:12px 16px;overflow:hidden}
-    .tm{font-size:12px;color:#6b7280;padding-right:54px}.tl{font-size:17px;font-weight:700;color:#1f2430;margin-top:5px;word-break:break-all}.bd{font-size:13px;color:#4b5563;margin-top:7px;max-height:26px;overflow:hidden;text-overflow:ellipsis}
-    .pr{position:absolute;right:12px;top:10px;font-size:11px;color:#fff;background:${prioClr};border-radius:20px;padding:2px 9px}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;height:100vh;background:#fff;border-top:4px solid ${acc};padding:10px 14px 12px;overflow:hidden;display:flex;flex-direction:column}
+    .tm{font-size:12px;color:#6b7280;padding-right:54px}
+    .tl{font-size:16px;font-weight:700;color:#1f2430;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bd{font-size:12.5px;color:#4b5563;margin-top:5px;max-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .pr{position:absolute;right:12px;top:8px;font-size:11px;color:#fff;background:${prioClr};border-radius:20px;padding:2px 9px}
+    .btns{margin-top:auto;display:flex;gap:6px;flex-wrap:wrap}
+    button{font:inherit;font-size:12px;padding:5px 10px;border-radius:8px;border:1px solid #dfe3ee;background:#f7f8fc;color:#3b4252;cursor:pointer}
+    button:hover{border-color:${acc};color:${acc}}
+    button.primary{background:${acc};border-color:${acc};color:#fff}
+    button.ghost{background:transparent;border-color:transparent;color:#8891a5}
     </style></head><body>
-    <div class="tm">${t} · 开源日历</div>
+    <div class="tm">${t} · 开源日历${laterTxt}</div>
     <div class="tl">${esc(task.title)}</div>
     <div class="bd">${body}</div>
     <div class="pr">${prioTxt}</div>
+    <div class="btns">
+      <button class="primary" data-act="postpone" data-min="10">稍后 10 分钟</button>
+      <button data-act="postpone" data-min="60">稍后 1 小时</button>
+      <button data-act="open">打开日历</button>
+      <button class="ghost" data-act="close">关闭</button>
+    </div>
+    <script>
+      document.querySelectorAll('[data-act]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          try { window.popupApi.act(b.getAttribute('data-act'), Number(b.getAttribute('data-min') || 0)); }
+          catch (e) { window.close(); }
+        });
+      });
+    </script>
     </body></html>`;
   popupWin = new BrowserWindow({
-    width: 410,
-    height: 120,
+    width: 430,
+    height: 178,
     show: false,
     resizable: false,
     maximizable: false,
@@ -302,15 +361,35 @@ function showPopup(task, alert) {
     alwaysOnTop: true,
     skipTaskbar: false,
     frame: true,
-    title: '开源日历',
+    title: '开源日历 · 任务提醒',
     backgroundColor: '#ffffff',
-    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      preload: path.join(__dirname, 'popup-preload.js'),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
   });
   popupWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   popupWin.once('ready-to-show', () => { popupWin.show(); popupWin.focus(); });
-  setTimeout(() => { try { if (popupWin && !popupWin.isDestroyed()) popupWin.close(); } catch (e) { /* noop */ } }, 10000);
+  // 点通知打开时多留一会儿（用户可能正在看），兜底弹窗 45 秒后自动收起
+  const autoMs = (opts && opts.interactive) ? 180000 : 45000;
+  setTimeout(() => { if (popupWin && !popupWin.isDestroyed()) closePopup(); }, autoMs);
   popupWin.on('closed', () => { popupWin = null; });
 }
+
+ipcMain.handle('popup:data', () => (popupCtx ? { ...popupCtx } : null));
+ipcMain.on('popup:action', (e, msg) => {
+  const m = msg || {};
+  const ctx = popupCtx;
+  if (ctx && m.action === 'postpone') {
+    const minutes = POSTPONE_OPTIONS.includes(Number(m.minutes)) ? Number(m.minutes) : 10;
+    postponeReminder(ctx.taskId, minutes, ctx.occKey);
+  } else if (ctx && m.action === 'open') {
+    focusTask(ctx.taskId);
+  }
+  closePopup();
+});
 
 function focusTask(taskId) {
   if (!win) return;
@@ -580,7 +659,7 @@ const DEFAULT_MAA_PREFS = {
   skipIfRunning: true,
 };
 let apiServer = null;
-const maaState = { pid: null, startedAt: null };
+const maaState = { pid: null, startedAt: null, label: '', stoppedByUser: false, finishedNotified: false };
 const maaStopTimer = { id: null };
 
 function updatePrefs() {
@@ -822,6 +901,7 @@ function maaStop() {
   if (maaStopTimer.id) { clearTimeout(maaStopTimer.id); maaStopTimer.id = null; }
   if (!pid) return { ok: false, error: 'MAA 未由本应用启动（或已经停止）' };
   try {
+    maaState.stoppedByUser = true; // 手动停止不再发「已结束」通知
     execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
     maaState.pid = null;
     maaState.startedAt = null;
@@ -830,6 +910,39 @@ function maaStop() {
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) };
   }
+}
+
+// MAA 跑完（进程消失）时发一次通知 —— 补上"启动有通知、结束没下文"的断层
+function checkMaaFinished() {
+  if (!maaState.pid || maaState.finishedNotified) return;
+  let running = true;
+  try { process.kill(maaState.pid, 0); } catch (e) { running = false; }
+  if (running) return;
+  const mins = maaState.startedAt ? Math.max(0, Math.round((Date.now() - maaState.startedAt) / 60000)) : 0;
+  const label = maaState.label || 'MAA';
+  const byUser = !!maaState.stoppedByUser;
+  maaState.pid = null;
+  maaState.startedAt = null;
+  maaState.label = '';
+  maaState.stoppedByUser = false;
+  maaState.finishedNotified = true;
+  if (byUser) { console.log('[maa] 已由用户手动停止'); return; }
+  const title = 'MAA 已结束';
+  const body = `${label} · 运行约 ${mins < 1 ? '不到 1' : mins} 分钟`;
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title, body, silent: true });
+      n.on('click', () => ensureWindow());
+      n.show();
+    }
+  } catch (e) {
+    console.error('[maa] 结束通知失败', e);
+  }
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('maa:event', { taskId: null, title, result: { ok: true, finished: true, minutes: mins } });
+  }
+  notifyWebhook('maa.finished', { label, minutes: mins });
+  console.log('[maa] 已结束，用时', mins, '分钟');
 }
 
 // 启动 MAA（带"已在运行则跳过"与"自动停止"能力）
@@ -844,6 +957,9 @@ function maaStartWithOptions(taskName, opts) {
   }
   const r = maaStart(taskName);
   if (!r.ok) return r;
+  // 记录触发来源，结束时通知里能说清是哪个任务/计划启动的
+  maaState.label = o.label || taskName || mp.autoStartTask || 'MAA';
+  maaState.finishedNotified = false;
   const stopMin = Number(o.autoStopMin) > 0 ? Number(o.autoStopMin) : mp.autoStopMin;
   if (stopMin > 0) {
     if (maaStopTimer.id) clearTimeout(maaStopTimer.id);
@@ -870,28 +986,33 @@ function applyConfigByName(name) {
   return { ok: true, applied: true, current: name };
 }
 
-// 每天定时自动启动 MAA（用全局设置里的配置；优先级低于按日期绑定的专属配置）
+// 每天定时自动启动 MAA（优先当天的「每周计划」，否则用「每天」设置；优先级低于按日期绑定的专属配置）
+const WEEK_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 function checkDailyMaaStart() {
   try {
     const mp = maaPrefsLocal();
     const g = mp.global || {};
-    if (!g.dailyEnabled || !g.dailyTime) return { ok: true, skipped: '未开启每日自动启动' };
     const now = dayjs();
     const today = now.format('YYYY-MM-DD');
+    const plan = pickDailyPlan(mp.weekly, g, now.day());
+    if (!plan.enabled || !plan.time) return { ok: true, skipped: '未开启自动启动' };
     if (g.lastRunDate === today) return { ok: true, skipped: '今天已自动启动过' };
-    const due = dayjs(`${today}T${g.dailyTime}:00`);
+    const due = dayjs(`${today}T${plan.time}:00`);
     if (!due.isValid() || now.isBefore(due)) return { ok: true, skipped: '还没到设定时间' };
     if (!mp.exePath || !fs.existsSync(mp.exePath)) {
       console.log('[maa] 每日自动启动跳过：尚未配置 MAA 路径');
       return { ok: false, error: '尚未配置 MAA 路径' };
     }
-    if (g.configName) {
-      const applied = applyConfigByName(g.configName);
-      if (applied && applied.ok === false) console.error('[maa] 每日自动启动切换配置失败：', applied.error);
+    if (plan.configName) {
+      const applied = applyConfigByName(plan.configName);
+      if (applied && applied.ok === false) console.error('[maa] 自动启动切换配置失败：', applied.error);
     }
-    const r = maaStartWithOptions(mp.autoStartTask, {});
-    console.log('[maa] 每日自动启动（' + g.dailyTime + '）→', JSON.stringify(r));
-    if (win && !win.isDestroyed()) win.webContents.send('maa:event', { taskId: null, title: '每日自动启动', result: r });
+    const label = plan.source === 'weekly'
+      ? `每周计划 · ${WEEK_CN[plan.weekday] || ''}`
+      : `每日计划 · ${plan.time}`;
+    const r = maaStartWithOptions(mp.autoStartTask, { label });
+    console.log(`[maa] 自动启动（${plan.source} ${plan.time}）→`, JSON.stringify(r));
+    if (win && !win.isDestroyed()) win.webContents.send('maa:event', { taskId: null, title: label, result: r });
     prefs.maa = { ...mp, global: { ...g, lastRunDate: today } };
     savePrefs();
     return r;
@@ -913,7 +1034,10 @@ function maybeStartMaaForTask(task, opts) {
       if (applied && applied.applied) console.log('[maa] 使用日期绑定配置:', applied.current);
       else if (applied && applied.ok === false) console.error('[maa] 日期配置切换失败:', applied.error);
     }
-    const r = maaStartWithOptions(m.task, { autoStopMin: m.autoStopMin });
+    const r = maaStartWithOptions(m.task, {
+      autoStopMin: m.autoStopMin,
+      label: task && task.title ? `任务「${task.title}」` : '',
+    });
     console.log('[maa] 任务联动触发:', task.title, '→', JSON.stringify(r));
     if (win && !win.isDestroyed()) {
       win.webContents.send('maa:event', { taskId: task.id, title: task.title, result: r });
@@ -943,6 +1067,7 @@ function maaStatus() {
     running,
     pid: running ? maaState.pid : null,
     startedAt: running ? maaState.startedAt : null,
+    label: running ? (maaState.label || '') : '',
     configured: !!(mp.exePath && fs.existsSync(mp.exePath)),
     exePath: mp.exePath,
     argsTemplate: mp.argsTemplate,
@@ -1607,6 +1732,8 @@ ipcMain.handle('maa:globalGet', () => {
   return {
     ok: true,
     global: mp.global,
+    weekly: mp.weekly || {},
+    todayPlan: pickDailyPlan(mp.weekly, mp.global, dayjs().day()),
     configs: r.ok ? Object.keys(r.json.Configurations || {}) : [],
     configError: r.ok ? '' : r.error,
     maaConfigured: !!(mp.exePath && fs.existsSync(mp.exePath)),
@@ -1619,15 +1746,22 @@ ipcMain.handle('maa:globalGet', () => {
 
 ipcMain.handle('maa:globalSet', (e, patch) => {
   const mp = maaPrefsLocal();
-  prefs.maa = normalizeMaaPrefs({ ...mp, global: { ...mp.global, ...(patch || {}) } });
+  const p = patch || {};
+  // weekly 是整块替换（界面传完整表），其余字段是局部合并
+  const next = { ...mp, global: { ...mp.global, ...p } };
+  delete next.global.weekly;
+  if (p.weekly !== undefined) next.weekly = p.weekly;
+  prefs.maa = normalizeMaaPrefs(next);
   savePrefs();
-  return { ok: true, global: maaPrefsLocal().global };
+  const m2 = maaPrefsLocal();
+  return { ok: true, global: m2.global, weekly: m2.weekly || {} };
 });
 
 ipcMain.handle('maa:startNow', () => {
   const mp = maaPrefsLocal();
-  if (mp.global && mp.global.configName) applyConfigByName(mp.global.configName);
-  return maaStartWithOptions(mp.autoStartTask, {});
+  const plan = pickDailyPlan(mp.weekly, mp.global, dayjs().day());
+  if (plan.configName) applyConfigByName(plan.configName);
+  return maaStartWithOptions(mp.autoStartTask, { label: '手动启动' });
 });
 
 ipcMain.handle('maa:dailyCheck', () => checkDailyMaaStart());
@@ -1726,11 +1860,48 @@ ipcMain.handle('widget:setPalette', (e, wid, palette) => {
 ipcMain.handle('widget:data', (e, wid) => {
   const rec = widgetRecs.find((r) => r.id === wid);
   if (!rec) return null;
-  return {
-    ...widgetDataFor(rec.date),
+  const base = {
+    kind: rec.kind === 'maa' ? 'maa' : 'date',
     alwaysOnTop: !!rec.alwaysOnTop,
     palette: normalizeWidgetPalette(rec.palette),
   };
+  if (base.kind === 'maa') return { ...base, maa: maaWidgetData() };
+  return { ...base, ...widgetDataFor(rec.date) };
+});
+
+// MAA 监视小组件的数据
+function maaWidgetData() {
+  const st = maaStatus();
+  const mp = maaPrefsLocal();
+  const plan = pickDailyPlan(mp.weekly, mp.global, dayjs().day());
+  return {
+    running: !!st.running,
+    pid: st.pid || null,
+    minutes: st.startedAt ? Math.max(0, Math.round((Date.now() - st.startedAt) / 60000)) : 0,
+    label: st.label || '',
+    configured: !!st.configured,
+    exePath: st.exePath || '',
+    plan: { enabled: !!plan.enabled, time: plan.time || '', configName: plan.configName || '', source: plan.source },
+    lastRunDate: (mp.global || {}).lastRunDate || '',
+  };
+}
+
+// 创建一个 MAA 监视小组件
+ipcMain.handle('widget:createMaa', (e, opts) => {
+  const o = opts || {};
+  const rec = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    kind: 'maa',
+    date: dayjs().format('YYYY-MM-DD'),
+    x: Number.isFinite(o.x) ? Math.round(o.x) : undefined,
+    y: Number.isFinite(o.y) ? Math.round(o.y) : undefined,
+    alwaysOnTop: true,
+    palette: o.palette ? normalizeWidgetPalette(o.palette) : { ...DEFAULT_WIDGET_PALETTE },
+  };
+  widgetRecs.push(rec);
+  saveWidgets();
+  spawnWidgetWin(rec);
+  return { ok: true, id: rec.id };
 });
 
 ipcMain.handle('widget:close', (e, wid) => {
@@ -1761,6 +1932,144 @@ ipcMain.handle('prefs:set', (e, patch) => {
   prefs = { ...prefs, ...patch };
   savePrefs();
   return { ok: true, prefs: { ...prefs } };
+});
+
+// ---------------- 数据备份 / 恢复 ----------------
+const BACKUP_DIR = () => path.join(DATA_DIR(), 'backups');
+const BACKUP_KEEP = 7;
+
+function backupNames() {
+  try {
+    return fs.readdirSync(BACKUP_DIR()).filter((n) => n.endsWith('.json'));
+  } catch (e) {
+    return [];
+  }
+}
+
+// 打包当前数据文件成一份备份（单个 JSON，不依赖 zip）
+function createBackup() {
+  try {
+    fs.mkdirSync(BACKUP_DIR(), { recursive: true });
+    const files = {};
+    for (const k of BACKUP_FILE_KEYS) {
+      const p = path.join(DATA_DIR(), k);
+      try {
+        if (fs.existsSync(p)) files[k] = fs.readFileSync(p, 'utf-8');
+      } catch (e) { /* 读不到就跳过该文件 */ }
+    }
+    const name = backupName(new Date());
+    fs.writeFileSync(path.join(BACKUP_DIR(), name), JSON.stringify(buildPayload(files, new Date()), null, 2), 'utf-8');
+    const { remove } = pruneList(backupNames(), BACKUP_KEEP);
+    for (const r of remove) {
+      try { fs.unlinkSync(path.join(BACKUP_DIR(), r)); } catch (e) { /* noop */ }
+    }
+    console.log(`[backup] 已备份 ${Object.keys(files).length} 个数据文件 → ${name}（清理 ${remove.length} 份旧备份）`);
+    return { ok: true, name, count: Object.keys(files).length };
+  } catch (e) {
+    console.error('[backup] 备份失败', e);
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+// 每天首次启动自动备份一次（失败不影响启动）
+function maybeDailyBackup() {
+  try {
+    if (hasBackupToday(backupNames(), new Date())) return { ok: true, skipped: true };
+    return createBackup();
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+// 恢复后把磁盘内容重新载入内存态（并刷新界面）
+function reloadFromDisk() {
+  tasks = (loadJSON(TASKS_FILE(), { tasks: [] }).tasks) || [];
+  if (!Array.isArray(tasks)) tasks = [];
+  const p = loadJSON(PREFS_FILE(), null);
+  if (p && typeof p === 'object') prefs = p;
+  segments = (loadJSON(SEG_FILE(), { segments: [] }).segments) || [];
+  if (!Array.isArray(segments)) segments = [];
+  widgetRecs = (loadJSON(WIDGET_FILE(), { widgets: [] }).widgets) || [];
+  if (!Array.isArray(widgetRecs)) widgetRecs = [];
+  dayImgMap = loadJSON(DAYIMG_FILE(), {});
+  if (!dayImgMap || typeof dayImgMap !== 'object' || Array.isArray(dayImgMap)) dayImgMap = {};
+  loadHolidays();
+  if (win && !win.isDestroyed()) win.webContents.send('data:reloaded');
+  broadcastToWidgets('widget:update');
+  console.log('[backup] 已从备份恢复数据并重新载入');
+}
+
+function restoreBackup(name) {
+  try {
+    const base = path.basename(String(name || ''));
+    const p = path.join(BACKUP_DIR(), base);
+    if (!base || !fs.existsSync(p)) return { ok: false, error: '备份文件不存在' };
+    const parsed = parseBackup(fs.readFileSync(p, 'utf-8'));
+    if (!parsed.ok) return parsed;
+    // 恢复前先给"当前状态"再留一份，万一恢复错了还能回头
+    createBackup();
+    const written = [];
+    for (const [k, text] of Object.entries(parsed.files)) {
+      fs.writeFileSync(path.join(DATA_DIR(), k), text, 'utf-8');
+      written.push(k);
+    }
+    reloadFromDisk();
+    return { ok: true, at: parsed.at, files: written };
+  } catch (e) {
+    console.error('[backup] 恢复失败', e);
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+ipcMain.handle('backup:list', () => {
+  const names = backupNames().sort().reverse();
+  const items = names.map((n) => {
+    let size = 0;
+    let at = '';
+    try {
+      const full = path.join(BACKUP_DIR(), n);
+      size = fs.statSync(full).size;
+      const j = JSON.parse(fs.readFileSync(full, 'utf-8'));
+      at = j && j.at ? j.at : '';
+    } catch (e) { /* 忽略坏文件 */ }
+    return { name: n, size, at };
+  });
+  return { ok: true, dir: BACKUP_DIR(), keep: BACKUP_KEEP, items };
+});
+
+ipcMain.handle('backup:create', () => createBackup());
+
+// 一句话建任务：大脑在 src/nlp.js（纯逻辑），这里只做转发与兜底
+let nlpParser = null;
+try { nlpParser = require('./nlp'); } catch (e) { nlpParser = null; }
+ipcMain.handle('nlp:parseTask', (e, text) => {
+  if (!nlpParser || typeof nlpParser.parseQuickTask !== 'function') {
+    return { ok: false, error: '一句话解析器未安装' };
+  }
+  try {
+    const r = nlpParser.parseQuickTask(String(text || ''), new Date());
+    return r && typeof r === 'object' ? r : { ok: false };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+ipcMain.handle('app:openDataDir', async () => {
+  try {
+    await shell.openPath(DATA_DIR());
+    return { ok: true, dir: DATA_DIR() };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+ipcMain.handle('backup:restore', (e, name) => restoreBackup(name));
+ipcMain.handle('backup:openDir', async () => {
+  try {
+    fs.mkdirSync(BACKUP_DIR(), { recursive: true });
+    await shell.openPath(BACKUP_DIR());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
 });
 
 // ---------------- 图片 ----------------
@@ -2165,8 +2474,8 @@ function spawnWidgetWin(rec) {
     if (old && !old.isDestroyed()) { old.show(); return old; }
   }
   const w = new BrowserWindow({
-    width: 232,
-    height: 196,
+    width: rec.kind === 'maa' ? 240 : 232,
+    height: rec.kind === 'maa' ? 214 : 196,
     x: Number.isFinite(rec.x) ? rec.x : undefined,
     y: Number.isFinite(rec.y) ? rec.y : undefined,
     minWidth: 168,
@@ -2307,6 +2616,7 @@ app.whenReady().then(() => {
   if (!prefs.api.token) { prefs.api.token = newToken(); savePrefs(); }
   if (!prefs.maa || typeof prefs.maa !== 'object') prefs.maa = { ...DEFAULT_MAA_PREFS };
   loadHolidays(); // 载入休息日 / 调休数据
+  maybeDailyBackup(); // 每天首次启动自动备份一次数据
   if (!prefs.festivals || typeof prefs.festivals !== 'object') prefs.festivals = { ...DEFAULT_FESTIVAL_PREFS };
   if (!Array.isArray(prefs.festivals.countries) || !prefs.festivals.countries.length) prefs.festivals.countries = ['cn'];
   if (!Array.isArray(prefs.festivals.hidden)) prefs.festivals.hidden = [];

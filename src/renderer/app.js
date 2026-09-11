@@ -615,6 +615,31 @@ function openTaskModal(task) {
   }, 30);
 }
 
+// 任务弹窗里的「一句话快速填写」：回车解析并填入下面各项
+$('#fQuick').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const text = e.target.value.trim();
+  if (!text) return;
+  let r = null;
+  try { r = await window.api.parseQuickTask(text); } catch (err) { r = null; }
+  if (!r || !r.ok) { alert('没解析出内容，直接把这句话作为标题填进去了'); $('#fTitle').value = text; e.target.value = ''; return; }
+  if (r.title) $('#fTitle').value = r.title;
+  if (r.date) $('#fDate').value = r.date;
+  if (r.time) $('#fTime').value = r.time;
+  if (r.repeat && r.repeat !== 'none') $('#fRepeat').value = r.repeat;
+  if (Array.isArray(r.reminders) && r.reminders.length) {
+    remindDraft = remindDraft.concat(r.reminders.map((x, i) => ({
+      id: 'r_q' + Date.now().toString(36) + i,
+      offsetMinutes: Number(x.offsetMinutes) || 0,
+      action: 'notify',
+    })));
+    renderReminders();
+  }
+  e.target.value = '';
+});
+
+// 任务弹窗里的「一句话快速填写」等交互，需要在表单提交前确保快速框不参与校验
 function closeModal(id) {
   document.getElementById(id).hidden = true;
 }
@@ -1343,6 +1368,7 @@ $('#btnSettings').addEventListener('click', async () => {
   await updateUpdateUI();
   await renderFestivalUI();
   await renderPluginList();
+  await updateBackupUI();
   $('#settingsSaveHint').textContent = '';
   $('#settingsSaveHint').classList.remove('warn');
   $('#settingsModal').hidden = false;
@@ -2281,8 +2307,62 @@ async function renderMaaGlobal() {
   }
   sel.value = g.configName || '';
   $('#maaGlobalStatus').textContent = maaGlobalStatusText(d);
+  renderMaaWeekly(d);
 }
 
+// 每周计划表（按星期分别设定时间与配置）
+const WEEK_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function renderMaaWeekly(d) {
+  const box = $('#maaWeekly');
+  if (!box) return;
+  const weekly = (d && d.weekly) || {};
+  const configs = (d && d.configs) || [];
+  box.innerHTML = WEEK_NAMES.map((name, i) => {
+    const w = weekly[String(i)] || { enabled: false, time: '08:00', configName: '' };
+    const opts = ['<option value="">（不切换配置）</option>']
+      .concat(configs.map((c) => `<option value="${esc(c)}"${c === w.configName ? ' selected' : ''}>${esc(c)}</option>`))
+      .concat((w.configName && !configs.includes(w.configName))
+        ? [`<option value="${esc(w.configName)}" selected>${esc(w.configName)}（未找到）</option>`]
+        : [])
+      .join('');
+    const dis = w.enabled ? '' : ' disabled';
+    return `<div class="wk-row${w.enabled ? ' on' : ''}" data-day="${i}">
+        <span class="wk-day">${name}</span>
+        <label class="inline-check"><input type="checkbox" class="wk-en"${w.enabled ? ' checked' : ''} /></label>
+        <input type="time" class="wk-time" value="${esc(w.time || '08:00')}"${dis} />
+        <select class="wk-cfg"${dis}>${opts}</select>
+      </div>`;
+  }).join('');
+}
+
+// 只在打开弹窗时渲染；改动时仅保存 + 切换本行控件可用状态（不重建 DOM，避免打断操作）
+$('#maaWeekly').addEventListener('change', async (e) => {
+  const row = e.target.closest('.wk-row');
+  if (row) {
+    const en = row.querySelector('.wk-en').checked;
+    row.classList.toggle('on', en);
+    row.querySelector('.wk-time').disabled = !en;
+    row.querySelector('.wk-cfg').disabled = !en;
+  }
+  const weekly = {};
+  document.querySelectorAll('#maaWeekly .wk-row').forEach((r) => {
+    if (r.querySelector('.wk-en').checked) {
+      weekly[r.dataset.day] = {
+        enabled: true,
+        time: r.querySelector('.wk-time').value || '08:00',
+        configName: r.querySelector('.wk-cfg').value || '',
+      };
+    }
+  });
+  await window.api.maaGlobalSet({ weekly });
+  await refreshMaaGlobalStatus();
+});
+
+$('#btnMaaWidget').addEventListener('click', async () => {
+  const r = await window.api.createMaaWidget({});
+  if (!r || !r.ok) { alert('创建 MAA 监视小组件失败'); return; }
+  $('#maaStatus').textContent = '已放到桌面（可拖动、可点 🎨 换配色）';
+});
 $('#btnMaaGlobal').addEventListener('click', async () => {
   $('#maaGlobalModal').hidden = false;
   await renderMaaGlobal();
@@ -2317,6 +2397,233 @@ $('#btnMaaGlobalOpenPanel').addEventListener('click', () => {
   $('#maaGlobalModal').hidden = true;
   openMaaPanel(selectedDate);
 });
+
+// ---------- 命令面板（Ctrl+K）与快捷键 ----------
+let cmdItems = [];
+let cmdIndex = 0;
+
+function cmdClose() {
+  $('#cmdModal').hidden = true;
+  cmdItems = [];
+  cmdIndex = 0;
+}
+
+function jumpToDate(dateStr, { openEditor } = {}) {
+  const d = dateOf(dateStr);
+  viewY = d.getFullYear();
+  viewM = d.getMonth();
+  selectedDate = dateStr;
+  renderCalendar();
+  renderDayPanel();
+  if (openEditor) {
+    const t = tasks.find((x) => x.date === dateStr);
+    if (t) openTaskModal(t);
+  }
+}
+
+// 从输入里解析"跳到"的目标日期（先用直观规则，稍后可由一句话解析器增强）
+function cmdParseDate(text) {
+  const s = String(text || '').trim();
+  const now = new Date();
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (!s) return null;
+  if (/^(今天|今日)$/i.test(s)) return fmt(now);
+  if (/^(明天|明日)$/i.test(s)) { const d = new Date(now); d.setDate(d.getDate() + 1); return fmt(d); }
+  if (/^后天$/.test(s)) { const d = new Date(now); d.setDate(d.getDate() + 2); return fmt(d); }
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s) || /^(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (m && m.length === 4) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return Number.isNaN(d.getTime()) ? null : fmt(d);
+  }
+  if (m && m.length === 3) {
+    const d = new Date(now.getFullYear(), Number(m[1]) - 1, Number(m[2]));
+    if (d < new Date(now.getFullYear(), now.getMonth(), now.getDate())) d.setFullYear(d.getFullYear() + 1);
+    return Number.isNaN(d.getTime()) ? null : fmt(d);
+  }
+  m = /^(\d{1,2})月(\d{1,2})[日号]?$/.exec(s);
+  if (m) {
+    const d = new Date(now.getFullYear(), Number(m[1]) - 1, Number(m[2]));
+    if (d < new Date(now.getFullYear(), now.getMonth(), now.getDate())) d.setFullYear(d.getFullYear() + 1);
+    return Number.isNaN(d.getTime()) ? null : fmt(d);
+  }
+  m = /^(?:周|星期|礼拜)([一二三四五六日天])$/.exec(s);
+  if (m) {
+    const map = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 };
+    const target = map[m[1]];
+    const d = new Date(now);
+    const delta = (target - d.getDay() + 7) % 7;
+    d.setDate(d.getDate() + (delta === 0 ? 7 : delta));
+    return fmt(d);
+  }
+  return null;
+}
+
+function cmdBuild(query) {
+  const q = String(query || '').trim();
+  const out = [];
+  const jumpDate = cmdParseDate(q);
+  if (jumpDate) {
+    out.push({ icon: '📅', label: `跳到 ${jumpDate}`, kind: '跳转', run: () => jumpToDate(jumpDate) });
+  }
+  if (q) {
+    const hits = tasks.filter((t) => (t.title || '').toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+    for (const t of hits) {
+      out.push({
+        icon: '🔔',
+        label: `${t.date} ${t.time} ${t.title}`,
+        kind: '任务',
+        run: () => { jumpToDate(t.date, { openEditor: false }); openTaskModal(t); },
+      });
+    }
+    out.push({ icon: '➕', label: `新建任务：${q}`, kind: '新建', run: () => cmdCreateTask(q) });
+  }
+  out.push({ icon: '⚙', label: '打开设置', kind: '命令', run: () => { $('#btnSettings').click(); } });
+  out.push({ icon: '🎮', label: '打开 MAA 任务面板', kind: '命令', run: () => { $('#btnMaaGlobal').click(); } });
+  out.push({ icon: '📅', label: '回到今天', kind: '命令', run: () => jumpToDate(fmtDate(new Date())) });
+  out.push({ icon: '🗄', label: '立即备份数据', kind: '命令', run: async () => { const r = await window.api.createBackup(); alert(r && r.ok ? '已备份：' + r.name : '备份失败'); } });
+  return out;
+}
+
+// 一句话建任务：优先用解析器，没有解析器时退化为"标题 + 当前时间"
+async function cmdCreateTask(text) {
+  let parsed = null;
+  try { parsed = await window.api.parseQuickTask(text); } catch (e) { parsed = null; }
+  if (parsed && parsed.ok) {
+    openTaskModal(null);
+    $('#fTitle').value = parsed.title || text;
+    if (parsed.date) $('#fDate').value = parsed.date;
+    if (parsed.time) $('#fTime').value = parsed.time;
+    if (parsed.repeat) $('#fRepeat').value = parsed.repeat;
+    if (Array.isArray(parsed.reminders) && parsed.reminders.length) {
+      remindDraft = parsed.reminders.map((r, i) => ({
+        id: 'r_q_' + i + '_' + Math.random().toString(36).slice(2, 5),
+        offsetMinutes: Number(r.offsetMinutes) || 0,
+        action: 'notify',
+      }));
+      renderReminders();
+    }
+  } else {
+    openTaskModal(null);
+    $('#fTitle').value = text;
+  }
+}
+
+function cmdRender() {
+  const list = $('#cmdList');
+  if (!cmdItems.length) {
+    list.innerHTML = '<div class="cmd-empty">没有匹配结果</div>';
+    return;
+  }
+  list.innerHTML = cmdItems.map((it, i) => (
+    `<div class="cmd-item${i === cmdIndex ? ' active' : ''}" data-i="${i}">
+       <span>${it.icon}</span><span class="cmd-label">${esc(it.label)}</span><span class="cmd-kind">${esc(it.kind)}</span>
+     </div>`
+  )).join('');
+  const active = list.querySelector('.cmd-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+async function cmdRun(i) {
+  const it = cmdItems[i];
+  cmdClose();
+  if (it && typeof it.run === 'function') await it.run();
+}
+
+function openCmdPalette(prefill) {
+  $('#cmdModal').hidden = false;
+  const input = $('#cmdInput');
+  input.value = prefill || '';
+  cmdItems = cmdBuild(input.value);
+  cmdIndex = 0;
+  cmdRender();
+  setTimeout(() => input.focus(), 30);
+}
+
+$('#cmdInput').addEventListener('input', (e) => {
+  cmdItems = cmdBuild(e.target.value);
+  cmdIndex = 0;
+  cmdRender();
+});
+$('#cmdInput').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (cmdItems.length) { cmdIndex = (cmdIndex + 1) % cmdItems.length; cmdRender(); } }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); if (cmdItems.length) { cmdIndex = (cmdIndex - 1 + cmdItems.length) % cmdItems.length; cmdRender(); } }
+  else if (e.key === 'Enter') { e.preventDefault(); cmdRun(cmdIndex); }
+  else if (e.key === 'Escape') { e.preventDefault(); cmdClose(); }
+});
+$('#cmdList').addEventListener('click', (e) => {
+  const it = e.target.closest('.cmd-item');
+  if (it) cmdRun(Number(it.dataset.i));
+});
+$('#cmdModal').addEventListener('click', (e) => { if (e.target === $('#cmdModal')) cmdClose(); });
+
+// 全局快捷键（在输入框里输入时不触发单键快捷键）
+function initShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '');
+    const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K' || e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      if ($('#cmdModal').hidden) openCmdPalette(); else cmdClose();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); $('#btnSettings').click(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); openTaskModal(null); return; }
+    if (e.key === 'Escape') {
+      const open = Array.from(document.querySelectorAll('.modal-mask')).find((m) => !m.hidden);
+      if (open) { open.hidden = true; }
+      return;
+    }
+    if (typing || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === 't' || e.key === 'T') { jumpToDate(fmtDate(new Date())); }
+    else if (e.key === 'ArrowLeft') { viewM -= 1; if (viewM < 0) { viewM = 11; viewY -= 1; } renderCalendar(); }
+    else if (e.key === 'ArrowRight') { viewM += 1; if (viewM > 11) { viewM = 0; viewY += 1; } renderCalendar(); }
+  });
+}
+
+// ---------- 数据备份与恢复 ----------
+async function updateBackupUI() {
+  let d = null;
+  try { d = await window.api.listBackups(); } catch (e) { d = null; }
+  const st = $('#backupStatus');
+  const sel = $('#backupList');
+  if (!d || !d.ok) { st.textContent = '备份状态读取失败'; return; }
+  const items = d.items || [];
+  st.textContent = items.length
+    ? `共 ${items.length} 份备份（最多保留 ${d.keep} 份）· 最近：${items[0].name.replace(/^backup-|\.json$/g, '')}`
+      + `（${(items[0].size / 1024).toFixed(1)} KB）· 目录：${d.dir}`
+    : `还没有备份 · 目录：${d.dir}（应用每天首次启动会自动备份一次）`;
+  sel.innerHTML = items.length
+    ? items.map((it) => {
+      const label = it.name.replace(/^backup-/, '').replace(/\.json$/, '');
+      const nice = label.replace(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3 $4:$5:$6');
+      return `<option value="${it.name}">${nice} · ${(it.size / 1024).toFixed(1)} KB</option>`;
+    }).join('')
+    : '<option value="">（暂无备份）</option>';
+}
+$('#btnBackupNow').addEventListener('click', async () => {
+  const btn = $('#btnBackupNow');
+  btn.disabled = true;
+  try {
+    const r = await window.api.createBackup();
+    if (r && r.ok) { $('#backupStatus').textContent = '已创建备份：' + r.name; await updateBackupUI(); }
+    else alert('备份失败：' + ((r && r.error) || '未知错误'));
+  } finally { btn.disabled = false; }
+});
+$('#btnBackupDir').addEventListener('click', () => window.api.openBackupDir());
+$('#btnBackupDataDir').addEventListener('click', async () => {
+  const r = await window.api.openDataDir();
+  if (!r || !r.ok) alert('打开数据目录失败：' + ((r && r.error) || '未知错误'));
+});
+$('#btnBackupRestore').addEventListener('click', async () => {
+  const name = $('#backupList').value;
+  if (!name) { alert('还没有可恢复的备份'); return; }
+  if (!confirm(`确定用这份备份覆盖当前数据吗？\n\n${name}\n\n恢复前会自动把当前数据再备份一份，所以可以反悔。`)) return;
+  const r = await window.api.restoreBackup(name);
+  if (!r || !r.ok) { alert('恢复失败：' + ((r && r.error) || '未知错误')); return; }
+  alert(`已恢复（备份时间 ${r.at || '未知'}）：\n${(r.files || []).join('、')}\n\n界面已自动刷新。`);
+  await updateBackupUI();
+});
+window.api.onDataReloaded(() => { refresh().catch(() => {}); });
 
 // ---------- 应用更新 ----------
 let updInfo = null;
@@ -2640,6 +2947,7 @@ async function refresh() {
   initInfoTips();            // 选项旁的 ⓘ 说明浮层
   initInputFocusFallback();  // 输入框聚焦兜底
   initSettingsTabs();        // 设置面板的分类切换
+  initShortcuts();           // 全局快捷键（Ctrl+K 命令面板等）
   setInterval(updateLiquids, 1000); // 液体倒计时：每秒刷新液面
   // 桌面小组件双击标题 → 主窗口跳到该日期
   window.api.onFocusDate((dateStr) => {

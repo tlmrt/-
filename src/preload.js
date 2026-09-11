@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('api', {
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:enable', { id, enabled }),
   openPluginDir: () => ipcRenderer.invoke('plugins:openDir'),
+  openDataDir: () => ipcRenderer.invoke('app:openDataDir'),
+  parseQuickTask: (text) => ipcRenderer.invoke('nlp:parseTask', text),
   createDemoPlugin: () => ipcRenderer.invoke('plugins:createDemo'),
   openPluginGuide: () => ipcRenderer.invoke('plugins:openGuide'),
 
@@ -118,11 +120,22 @@ contextBridge.exposeInMainWorld('api', {
 
   // ---- 桌面小组件 ----
   createWidget: (payload) => ipcRenderer.invoke('widget:create', payload),
+  createMaaWidget: (payload) => ipcRenderer.invoke('widget:createMaa', payload),
   listWidgets: () => ipcRenderer.invoke('widget:list'),
   widgetData: (wid) => ipcRenderer.invoke('widget:data', wid),
   widgetClose: (wid) => ipcRenderer.invoke('widget:close', wid),
   widgetToggleTop: (wid) => ipcRenderer.invoke('widget:toggleTop', wid),
   widgetSetPalette: (wid, palette) => ipcRenderer.invoke('widget:setPalette', wid, palette),
+  // ---- 数据备份 / 恢复 ----
+  listBackups: () => ipcRenderer.invoke('backup:list'),
+  createBackup: () => ipcRenderer.invoke('backup:create'),
+  restoreBackup: (name) => ipcRenderer.invoke('backup:restore', name),
+  openBackupDir: () => ipcRenderer.invoke('backup:openDir'),
+  onDataReloaded: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('data:reloaded', handler);
+    return () => ipcRenderer.removeListener('data:reloaded', handler);
+  },
   widgetFocusMain: (wid) => ipcRenderer.invoke('widget:focusMain', wid),
   onWidgetUpdate: (cb) => {
     const handler = () => cb();

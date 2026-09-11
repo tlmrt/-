@@ -64,6 +64,8 @@ function normalizeMaaPrefs(p) {
     configName: typeof g.configName === 'string' ? g.configName.trim() : '',
     lastRunDate: typeof g.lastRunDate === 'string' ? g.lastRunDate : '',
   };
+  // 每周计划：为不同星期设置不同时间/配置（覆盖上面的"每天"设置）
+  const weekly = normalizeWeekly(s.weekly);
   return {
     exePath: typeof s.exePath === 'string' ? s.exePath : '',
     argsTemplate: typeof s.argsTemplate === 'string' ? s.argsTemplate : '',
@@ -74,6 +76,46 @@ function normalizeMaaPrefs(p) {
     skipIfRunning: s.skipIfRunning !== false, // 已在运行时不重复启动
     dateConfigs, // { 'YYYY-MM-DD': 'MAA 配置名' }
     global,
+    weekly, // { '0'..'6': { enabled, time, configName } }，0=周日
+  };
+}
+
+// 每周计划归一化：只接受 0-6 的键与合法时间/配置名
+function normalizeWeekly(w) {
+  const out = {};
+  if (!w || typeof w !== 'object' || Array.isArray(w)) return out;
+  for (const [k, v] of Object.entries(w)) {
+    const day = Number(k);
+    if (!Number.isInteger(day) || day < 0 || day > 6) continue;
+    const o = v && typeof v === 'object' ? v : {};
+    const time = typeof o.time === 'string' && /^\d{1,2}:\d{2}$/.test(o.time.trim())
+      ? o.time.trim().padStart(5, '0')
+      : '';
+    out[String(day)] = {
+      enabled: !!o.enabled,
+      time,
+      configName: typeof o.configName === 'string' ? o.configName.trim() : '',
+    };
+  }
+  return out;
+}
+
+// 某一天该用哪套计划：优先当天的「每周计划」，否则回落到「每天」设置
+// weekday 用 Date.getDay()（0=周日）
+function pickDailyPlan(weekly, global, weekday) {
+  const w = normalizeWeekly(weekly);
+  const day = Number(weekday);
+  const d = w[String(day)];
+  if (d && d.enabled && d.time) {
+    return { enabled: true, time: d.time, configName: d.configName || '', source: 'weekly', weekday: day };
+  }
+  const g = global && typeof global === 'object' ? global : {};
+  return {
+    enabled: !!g.dailyEnabled,
+    time: typeof g.dailyTime === 'string' ? g.dailyTime : '',
+    configName: typeof g.configName === 'string' ? g.configName : '',
+    source: 'global',
+    weekday: day,
   };
 }
 
@@ -99,4 +141,4 @@ function isRunningFromPid(pid, aliveCheck) {
   }
 }
 
-module.exports = { parseArgsString, renderArgs, normalizeMaaPrefs, normalizeTaskMaa, isRunningFromPid };
+module.exports = { parseArgsString, renderArgs, normalizeMaaPrefs, normalizeTaskMaa, isRunningFromPid, normalizeWeekly, pickDailyPlan };

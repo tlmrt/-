@@ -10,7 +10,7 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  let state = { date: null, tasks: [], segments: [], alwaysOnTop: false };
+  let state = { kind: 'date', date: null, tasks: [], segments: [], alwaysOnTop: false, maa: null };
   let globalAccent = '#4f6bff';
   let palette = { bg: '#ffffff', fg: '#2b3245', accent: '' };
 
@@ -105,6 +105,31 @@
       </button>`).join('');
   }
 
+  // MAA 监视视图
+  function renderMaa() {
+    const m = state.maa || {};
+    const box = $('#wdList');
+    const p = m.plan || {};
+    const planTxt = p.enabled
+      ? `${p.time || ''}${p.configName ? ' · ' + p.configName : ''}${p.source === 'weekly' ? '（每周计划）' : ''}`
+      : '未开启自动启动';
+    box.innerHTML = `
+      <div class="wd-maa">
+        <div class="wd-maa-state${m.running ? ' on' : ''}">
+          <span class="wd-dot${m.running ? ' on' : ''}"></span>
+          <span>${m.running ? `运行中 ${m.minutes} 分钟` : '未运行'}</span>
+        </div>
+        ${m.running && m.label ? `<div class="wd-maa-sub">来源：${esc(m.label)}</div>` : ''}
+        <div class="wd-maa-sub">今日计划：${esc(planTxt)}</div>
+        ${m.lastRunDate ? `<div class="wd-maa-sub">上次自动启动：${esc(m.lastRunDate)}</div>` : ''}
+        ${m.configured ? '' : '<div class="wd-maa-sub warn">未配置 MAA 路径（在设置里搜索）</div>'}
+        <div class="wd-maa-btns">
+          <button class="wd-mini primary" data-act="maa-start"${m.running ? ' disabled' : ''}>启动 MAA</button>
+          <button class="wd-mini" data-act="maa-stop"${m.running ? '' : ' disabled'}>停止</button>
+        </div>
+      </div>`;
+  }
+
   function renderList() {
     const box = $('#wdList');
     if (!state.tasks.length) {
@@ -153,10 +178,17 @@
         return;
       }
       state = d;
-      $('#wdDate').textContent = dateLabel(d.date);
-      $('#wdPin').classList.toggle('on', !!d.alwaysOnTop);
       if (d.palette) applyPalette(d.palette, false);
-      renderList();
+      if (state.kind === 'maa') {
+        $('#wdDate').textContent = 'MAA 监视';
+        state.segments = [];
+        renderMaa();
+        $('#wdFoot').innerHTML = '';
+      } else {
+        $('#wdDate').textContent = dateLabel(d.date);
+        renderList();
+      }
+      $('#wdPin').classList.toggle('on', !!d.alwaysOnTop);
       updateLiquid();
     } catch (e) {
       console.error('小组件取数失败', e);
@@ -188,10 +220,24 @@
   $('#wdCustFg').addEventListener('input', (e) => applyPalette({ ...palette, fg: e.target.value }, true));
   $('#wdCustAccent').addEventListener('input', (e) => applyPalette({ ...palette, accent: e.target.value }, true));
 
+  // MAA 监视：启动 / 停止
+  $('#wdList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b || b.disabled) return;
+    const act = b.getAttribute('data-act');
+    b.disabled = true;
+    try {
+      if (act === 'maa-start') { b.textContent = '启动中…'; await window.api.maaStartNow(); }
+      else if (act === 'maa-stop') { b.textContent = '停止中…'; await window.api.maaStop(); }
+    } catch (err) { /* 忽略 */ }
+    await load();
+  });
+
   // ---- 刷新循环 ----
   window.api.onWidgetUpdate(() => load());
   setInterval(updateLiquid, 1000);      // 液面随时间下降
   setInterval(load, 5 * 60 * 1000);     // 兜底刷新
+  setInterval(() => { if (state.kind === 'maa') load(); }, 15 * 1000); // MAA 状态 15 秒刷新一次
 
   (async function init() {
     try {
