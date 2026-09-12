@@ -227,6 +227,28 @@ input, textarea, select { user-select: text; }
 .cell-task.p-high { border-left-color: var(--high); background: #fff0f0; color: #b3363a; }
 .cell-task.p-medium { border-left-color: var(--medium); background: #fff6ea; color: #9a5b00; }
 .cell-task.p-low { border-left-color: var(--low); background: #ecf8f2; color: #157a53; }
+
+/* ---------- 拖动任务改期 ---------- */
+.cell-task { cursor: grab; }
+.task-card { cursor: grab; }
+body.dragging-task .cell-task,
+body.dragging-task .task-card { cursor: grabbing; }
+body.dragging-task .day-cell { cursor: copy; }
+.day-cell.drag-over {
+  outline: 2px dashed var(--primary);
+  outline-offset: -3px;
+  background: rgba(var(--primary-rgb), .12) !important;
+}
+.day-cell.drag-over::after {
+  content: '移到这里';
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--primary);
+  pointer-events: none;
+}
 .cell-more { font-size: 10.5px; color: var(--text-3); margin-top: 1px; padding-left: 4px; }
 .day-dots .dots-more { font-size: 11px; color: var(--text-3); line-height: 14px; }
 .dot {

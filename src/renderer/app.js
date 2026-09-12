@@ -304,7 +304,7 @@ function renderCalendar() {
     const dayTasks = tasksOn(ds);
     let cellTasks = '';
     dayTasks.slice(0, 3).forEach((t) => {
-      cellTasks += `<div class="cell-task p-${t.priority}" title="${esc(t.time)} ${esc(t.title)}">${esc(t.time)} ${esc(t.title)}</div>`;
+      cellTasks += `<div class="cell-task p-${t.priority}" data-task="${esc(t.id)}" title="${esc(t.time)} ${esc(t.title)}（可拖到别的日期）">${esc(t.time)} ${esc(t.title)}</div>`;
     });
     if (dayTasks.length > 3) cellTasks += `<div class="cell-more">还有 ${dayTasks.length - 3} 项…</div>`;
 
@@ -1108,51 +1108,115 @@ const SEG_PRESET_COLORS = ['#4f6bff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'
 // 时间段的新建/编辑入口已合并到「＋ 添加任务」弹窗（类型 = 时间段）
 
 // ---------- 拖拽日期格子到桌面 → 生成小组件 ----------
+// 拖拽：①拖任务条/任务卡片到别的日期格 → 改期；②拖日期格空白到桌面 → 生成小组件
 function initWidgetDrag() {
   const THRESH = 8;
   let drag = null;
 
+  const clearHover = () => {
+    document.querySelectorAll('.day-cell.drag-over').forEach((c) => c.classList.remove('drag-over'));
+  };
+
   document.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
-    const cell = e.target.closest('.day-cell');
+    // e.target 可能是 document（例如程序化派发），做一次保护
+    const tgt = e.target && e.target.closest ? e.target : null;
+    if (!tgt) return;
+    // ① 拖任务（日历格里的任务条 / 右栏任务卡片）→ 移动日期
+    const cellTask = tgt.closest('.cell-task[data-task]');
+    const card = tgt.closest('.task-card[data-id]');
+    if (cellTask || card) {
+      const id = cellTask ? cellTask.dataset.task : card.dataset.id;
+      if (id && tasks.some((t) => t.id === id)) {
+        drag = { kind: 'task', taskId: id, sx: e.clientX, sy: e.clientY, moved: false };
+        return;
+      }
+    }
+    if (tgt.closest('.cell-img')) return;
+    // ② 拖日期格子空白 → 生成桌面小组件
+    const cell = tgt.closest('.day-cell');
     if (!cell) return;
-    if (e.target.closest('.cell-img')) return;
-    drag = { date: cell.dataset.date, sx: e.clientX, sy: e.clientY, moved: false };
+    drag = { kind: 'widget', date: cell.dataset.date, sx: e.clientX, sy: e.clientY, moved: false };
   });
 
   document.addEventListener('pointermove', (e) => {
     if (!drag) return;
     if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < THRESH) return;
-    drag.moved = true;
-    document.body.classList.add('dragging-widget');
+    if (!drag.moved) {
+      drag.moved = true;
+      document.body.classList.add(drag.kind === 'task' ? 'dragging-task' : 'dragging-widget');
+    }
     const g = $('#dragGhost');
     g.hidden = false;
-    g.style.left = e.clientX + 'px';
-    g.style.top = e.clientY + 'px';
-    g.textContent = `松手放到桌面 → 「${drag.date}」小组件`;
+    g.style.left = `${e.clientX}px`;
+    g.style.top = `${e.clientY}px`;
+    if (drag.kind === 'task') {
+      const t = tasks.find((x) => x.id === drag.taskId);
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      const cell = under && under.closest ? under.closest('.day-cell') : null;
+      const target = cell ? cell.dataset.date : '';
+      clearHover();
+      if (cell && t && target !== t.date) {
+        cell.classList.add('drag-over');
+        g.textContent = `松手把「${t.title}」移到 ${target}`;
+      } else {
+        g.textContent = t ? `拖动「${t.title}」到别的日期` : '拖动任务';
+      }
+    } else {
+      g.textContent = `松手放到桌面 → 「${drag.date}」小组件`;
+    }
   });
 
   document.addEventListener('pointerup', async (e) => {
     if (!drag) return;
-    const wasDrag = drag.moved;
-    const date = drag.date;
+    const d = drag;
     drag = null;
-    document.body.classList.remove('dragging-widget');
+    document.body.classList.remove('dragging-task', 'dragging-widget');
     $('#dragGhost').hidden = true;
-    if (!wasDrag) return;
-    suppressClickUntil = Date.now() + 400; // 拖拽后不触发选中
+    clearHover();
+    if (!d.moved) return;
+    suppressClickUntil = Date.now() + 400; // 拖拽后不触发选中/编辑
+
+    if (d.kind === 'task') {
+      const t = tasks.find((x) => x.id === d.taskId);
+      if (!t) return;
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      const cell = under && under.closest ? under.closest('.day-cell') : null;
+      const target = cell ? cell.dataset.date : '';
+      if (!target || target === t.date) return; // 没落在别的日期上
+      const moved = { ...t, date: target };
+      await window.api.saveTask(moved);
+      window.eveBus.emit('eve:task-saved', moved);
+      selectedDate = target;
+      const dd = dateOf(target);
+      viewY = dd.getFullYear();
+      viewM = dd.getMonth();
+      await refresh();
+      if (window.eve && window.eve.toast) {
+        window.eve.toast(
+          t.repeat && t.repeat !== 'none'
+            ? `已把「${t.title}」的起始日改到 ${target}（重复任务从这天重新开始）`
+            : `已把「${t.title}」移到 ${target}`,
+          3500
+        );
+      }
+      return;
+    }
+
+    // 小组件：只有松手位置在主窗口外才创建
     const outX = e.screenX < window.screenX || e.screenX > window.screenX + window.outerWidth;
     const outY = e.screenY < window.screenY || e.screenY > window.screenY + window.outerHeight;
     if (outX || outY) {
-      const r = await window.api.createWidget({ date, x: e.screenX - 116, y: e.screenY - 40 });
-      if (r && r.ok) window.eveBus.emit('eve:widget-created', date);
+      const r = await window.api.createWidget({ date: d.date, x: e.screenX - 116, y: e.screenY - 40 });
+      if (r && r.ok) window.eveBus.emit('eve:widget-created', d.date);
     }
   });
 
   document.addEventListener('pointercancel', () => {
     drag = null;
-    document.body.classList.remove('dragging-widget');
+    document.body.classList.remove('dragging-task', 'dragging-widget');
     $('#dragGhost').hidden = true;
+    clearHover();
   });
 }
 
