@@ -23,6 +23,7 @@ const { launchConfig, autostartState } = require('./autostart');
 const { POSTPONE_OPTIONS, normalizePostpone, duePostponed } = require('./postpone');
 const { backupName, buildPayload, parseBackup, pruneList, hasBackupToday, BACKUP_FILE_KEYS } = require('./backup');
 const { normalizeQuiet, inQuietHours, buildQuietSummary } = require('./quiet');
+const { parseMaaLog, describeMaaProgress, trimPartialFirstLine } = require('./maalog');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
@@ -1275,6 +1276,67 @@ function maybeStartMaaForTask(task, opts) {
   }
 }
 
+// ---------------- 读取 MAA 运行进度（来自 MAA 自己的 debug/gui.log） ----------------
+const MAA_LOG_TAIL = 200 * 1024; // 只看尾部 200KB，足够覆盖一次完整运行
+const maaLogCache = { key: '', state: null };
+
+function maaLogPath() {
+  const mp = maaPrefsLocal();
+  if (!mp.exePath) return '';
+  return path.join(path.dirname(mp.exePath), 'debug', 'gui.log');
+}
+
+// 返回 { ok, ...解析结果, logAgeSec, logPath }；同一份日志（size+mtime 未变）直接走缓存
+function readMaaLogState() {
+  const p = maaLogPath();
+  if (!p) return { ok: false, error: '尚未配置 MAA 路径' };
+  let st = null;
+  try { st = fs.statSync(p); } catch (e) { return { ok: false, error: '未找到 MAA 日志（debug/gui.log）', logPath: p }; }
+  const logAgeSec = Math.max(0, Math.round((Date.now() - st.mtimeMs) / 1000));
+  const key = `${p}|${st.size}|${Math.round(st.mtimeMs)}`;
+  if (maaLogCache.key === key && maaLogCache.state) {
+    return { ok: true, ...maaLogCache.state, logAgeSec, logPath: p };
+  }
+  let text = '';
+  try {
+    const size = Math.min(MAA_LOG_TAIL, st.size);
+    const buf = Buffer.alloc(size);
+    const fd = fs.openSync(p, 'r');
+    fs.readSync(fd, buf, 0, size, st.size - size);
+    fs.closeSync(fd);
+    text = trimPartialFirstLine(buf.toString('utf-8'));
+  } catch (e) {
+    return { ok: false, error: '读取 MAA 日志失败：' + String(e && e.message ? e.message : e), logPath: p };
+  }
+  const state = parseMaaLog(text);
+  maaLogCache.key = key;
+  maaLogCache.state = state;
+  return { ok: true, ...state, logAgeSec, logPath: p };
+}
+
+// 给界面/接口用的进度描述：{ line1, line2, tone } + 原始字段
+function maaProgress() {
+  const st = maaStatus();
+  const raw = readMaaLogState();
+  if (!raw.ok) {
+    return { ok: false, error: raw.error, line1: '', line2: '', tone: 'idle', logPath: raw.logPath || '' };
+  }
+  const desc = describeMaaProgress(raw, { running: !!st.running, logAgeSec: raw.logAgeSec });
+  return {
+    ok: true,
+    ...desc,
+    currentTask: raw.currentTask,
+    lastSubStep: raw.lastSubStep,
+    lastDoneTask: raw.lastDoneTask,
+    allDone: raw.allDone,
+    elapsedText: raw.elapsedText,
+    staminaText: raw.staminaText,
+    taskId: raw.taskId,
+    logAgeSec: raw.logAgeSec,
+    logPath: raw.logPath,
+  };
+}
+
 function maaStatus() {
   let running = false;
   if (maaState.pid) {
@@ -1420,8 +1482,22 @@ async function handleApiRoute(route, { query, body }) {
       if (!r.ok) return bad(r.error || '停止 MAA 失败');
       return ok({ pid: r.pid });
     }
-    case 'maa.status':
-      return ok(maaStatus());
+    case 'maa.status': {
+      const prog = maaProgress();
+      return ok({
+        ...maaStatus(),
+        progress: {
+          line1: prog.line1 || '',
+          line2: prog.line2 || '',
+          tone: prog.tone || 'idle',
+          currentTask: prog.currentTask || '',
+          lastSubStep: prog.lastSubStep || '',
+          allDone: !!prog.allDone,
+          elapsedText: prog.elapsedText || '',
+          error: prog.error || '',
+        },
+      });
+    }
 
     case 'webhook.test': {
       const r = await notifyWebhook('test', { message: '这是来自开源日历的测试事件' });
@@ -2087,6 +2163,7 @@ function maaWidgetData() {
   const st = maaStatus();
   const mp = maaPrefsLocal();
   const plan = pickDailyPlan(mp.weekly, mp.global, dayjs().day());
+  const step = maaProgress();
   return {
     running: !!st.running,
     pid: st.pid || null,
@@ -2096,6 +2173,22 @@ function maaWidgetData() {
     exePath: st.exePath || '',
     plan: { enabled: !!plan.enabled, time: plan.time || '', configName: plan.configName || '', source: plan.source },
     lastRunDate: (mp.global || {}).lastRunDate || '',
+    // 当前进行到哪一步（读 MAA 的 debug/gui.log）
+    step: {
+      ok: !!step.ok,
+      line1: step.line1 || '',
+      line2: step.line2 || '',
+      tone: step.tone || 'idle',
+      currentTask: step.currentTask || '',
+      lastSubStep: step.lastSubStep || '',
+      lastDoneTask: step.lastDoneTask || '',
+      allDone: !!step.allDone,
+      elapsedText: step.elapsedText || '',
+      staminaText: step.staminaText || '',
+      taskId: step.taskId || 0,
+      logAgeSec: step.logAgeSec || 0,
+      error: step.error || '',
+    },
   };
 }
 
@@ -2777,8 +2870,8 @@ function spawnWidgetWin(rec) {
     if (old && !old.isDestroyed()) { old.show(); return old; }
   }
   const w = new BrowserWindow({
-    width: rec.kind === 'maa' ? 240 : 232,
-    height: rec.kind === 'maa' ? 214 : 196,
+    width: rec.kind === 'maa' ? 244 : 232,
+    height: rec.kind === 'maa' ? 246 : 196,
     x: Number.isFinite(rec.x) ? rec.x : undefined,
     y: Number.isFinite(rec.y) ? rec.y : undefined,
     minWidth: 168,

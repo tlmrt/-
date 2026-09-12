@@ -221,6 +221,18 @@ html, body {
 .wd-maa-state.on { color: #36b37e; }
 .wd-maa-sub { font-size: 11.5px; color: var(--wd-soft); line-height: 1.55; word-break: break-word; }
 .wd-maa-sub.warn { color: #e2604f; }
+/* 当前进行到哪一步：卡片里最醒目的信息 */
+.wd-maa-step {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--wd-fg);
+  word-break: break-word;
+}
+.wd-maa-step.running { color: var(--accent); }
+.wd-maa-step.done { color: #36b37e; }
+.wd-maa-step.stale { color: #e2604f; }
+.wd-maa-step.starting { color: var(--wd-soft); font-weight: 600; }
 .wd-maa-btns { display: flex; gap: 6px; margin-top: auto; }
 .wd-mini {
   font: inherit;

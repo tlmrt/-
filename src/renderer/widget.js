@@ -113,15 +113,24 @@
     const planTxt = p.enabled
       ? `${p.time || ''}${p.configName ? ' · ' + p.configName : ''}${p.source === 'weekly' ? '（每周计划）' : ''}`
       : '未开启自动启动';
+    const step = m.step || {};
+    const ageTxt = step.logAgeSec > 3600
+      ? `约 ${Math.round(step.logAgeSec / 3600)} 小时前`
+      : (step.logAgeSec > 60 ? `约 ${Math.round(step.logAgeSec / 60)} 分钟前` : '刚刚');
     box.innerHTML = `
       <div class="wd-maa">
         <div class="wd-maa-state${m.running ? ' on' : ''}">
           <span class="wd-dot${m.running ? ' on' : ''}"></span>
           <span>${m.running ? `运行中 ${m.minutes} 分钟` : '未运行'}</span>
         </div>
+        ${step.line1 ? `<div class="wd-maa-step ${esc(step.tone || '')}">${esc(step.line1)}</div>` : ''}
+        ${step.line2 ? `<div class="wd-maa-sub">${esc(step.line2)}</div>` : ''}
+        ${(m.running && !step.line1 && step.ok === false) ? `<div class="wd-maa-sub warn">${esc(step.error || '读不到 MAA 日志')}</div>` : ''}
         ${m.running && m.label ? `<div class="wd-maa-sub">来源：${esc(m.label)}</div>` : ''}
-        <div class="wd-maa-sub">今日计划：${esc(planTxt)}</div>
-        ${m.lastRunDate ? `<div class="wd-maa-sub">上次自动启动：${esc(m.lastRunDate)}</div>` : ''}
+        ${m.running ? '' : `<div class="wd-maa-sub">今日计划：${esc(planTxt)}</div>`}
+        ${(!m.running && step.ok && (step.currentTask || step.allDone || step.lastDoneTask))
+          ? `<div class="wd-maa-sub">上次运行：${esc(step.allDone ? '已全部完成' : (step.lastDoneTask || step.currentTask))}${step.elapsedText ? '（用时 ' + esc(step.elapsedText) + '）' : ''} · ${esc(ageTxt)}</div>` : ''}
+        ${(!m.running && m.lastRunDate) ? `<div class="wd-maa-sub">上次自动启动：${esc(m.lastRunDate)}</div>` : ''}
         ${m.configured ? '' : '<div class="wd-maa-sub warn">未配置 MAA 路径（在设置里搜索）</div>'}
         <div class="wd-maa-btns">
           <button class="wd-mini primary" data-act="maa-start"${m.running ? ' disabled' : ''}>启动 MAA</button>
@@ -237,7 +246,7 @@
   window.api.onWidgetUpdate(() => load());
   setInterval(updateLiquid, 1000);      // 液面随时间下降
   setInterval(load, 5 * 60 * 1000);     // 兜底刷新
-  setInterval(() => { if (state.kind === 'maa') load(); }, 15 * 1000); // MAA 状态 15 秒刷新一次
+  setInterval(() => { if (state.kind === 'maa') load(); }, 5 * 1000); // MAA 状态与进度 5 秒刷新一次
 
   (async function init() {
     try {
