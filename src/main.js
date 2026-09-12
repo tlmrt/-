@@ -2819,9 +2819,17 @@ function createWindow(showOnReady = true) {
   win.on('closed', () => { win = null; });
 }
 
+// 窗口图标（任务栏 / Alt+Tab 显示的就是它）：必须用高分辨率主图标，
+// 之前误用了 32px 的 tray.png，任务栏上会发糊、也不随主图标更新。
 function iconPath() {
-  const p = path.join(__dirname, '..', 'assets', 'tray.png');
-  return fs.existsSync(p) ? p : undefined;
+  const candidates = [
+    path.join(__dirname, '..', 'assets', 'icon.ico'), // 多尺寸，Windows 原生支持
+    path.join(__dirname, '..', 'assets', 'icon.png'), // 256px 兜底
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
 }
 
 function createTray() {
