@@ -51,7 +51,10 @@ console.error = (...args) => { pushDiag('ERROR', args); __origError(...args); };
 console.warn = (...args) => { pushDiag('WARN', args); __origWarn(...args); };
 
 const APP_ID = 'cn.evestudio.calendar';
-app.setAppUserModelId(APP_ID);
+// 只在打包版设置 AppUserModelID：
+// 开发模式（electron .）下设置它会让 Electron 自动往开始菜单写一个「Electron」快捷方式，
+// 用户若固定了那一个，打开后任务栏会显示 electron 而不是「开源日历」。
+if (app.isPackaged) app.setAppUserModelId(APP_ID);
 // 显示名改为「开源日历」，但内部名保持 evestudio-calendar 不变，
 // 以确保用户数据目录（%APPDATA%\evestudio-calendar）在改名前后一致、数据不丢
 app.setName('evestudio-calendar');

@@ -1,3 +1,20 @@
+# 开源日历 v0.1.16
+
+> 仅本机迭代，按要求**暂未上传 GitHub**。
+
+## 🧹 修复：固定后打开显示成「electron」
+
+**原因**：开发模式（`electron .`）运行时会 `app.setAppUserModelId(...)`，Electron 便会**自动往开始菜单写一个名为「Electron」的快捷方式**（指向 `node_modules/electron/dist/electron.exe`，用于 Windows 通知归属）。我平时跑自检会启动开发版，于是开始菜单里多出了这个 `Electron.lnk` —— 固定它、再从它启动，任务栏自然显示 electron。
+
+**修复**：
+- 已删除误导性的 `Electron.lnk`（开始菜单现在只剩正确的「开源日历」）
+- 代码上防复发：AppUserModelID **只在打包版**设置（`if (app.isPackaged)`），开发模式不再往开始菜单写快捷方式
+- 正式版 exe 的版本资源核实无误：`FileDescription / ProductName / InternalName` 均为「开源日历」，版本 0.1.16
+
+**你要做的**：如果已经把那个 Electron 项固定到了任务栏/开始菜单，请把它**取消固定**，再从开始菜单搜索「开源日历」（或桌面快捷方式）重新固定一次即可。
+
+---
+
 # 开源日历 v0.1.15
 
 > 仅本机迭代，按要求**暂未上传 GitHub**。
